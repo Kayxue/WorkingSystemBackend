@@ -7,14 +7,15 @@ import dbClient from "../Client/DrizzleClient.ts";
 import { eq, avg, count } from "drizzle-orm";
 import { employers, workers, workerRatings, employerRatings } from "../Schema/DatabaseSchema.ts";
 import { argon2Config } from "../config.ts";
-import { hash as argon2hash } from "@node-rs/argon2";
+import { hash as argon2hash, verify } from "@node-rs/argon2";
 import validate from "@nhttp/zod";
 import NotificationHelper from "../Utils/NotificationHelper.ts";
 import {
   employerSignupSchema,
   workerSignupSchema,
   updateWorkerProfileSchema,
-  updateEmployerProfileSchema
+  updateEmployerProfileSchema,
+  updatePasswordSchema,
 } from "../Middleware/validator.ts";
 import { uploadDocument, uploadProfilePhoto } from "../Middleware/uploadFile.ts";
 import { Role } from "../Types/types.ts";
@@ -366,6 +367,85 @@ router.put("/update/profile", authenticated, async ({ body, response, request, u
   }
 });
 
+//update password
+router.put(
+  "/update/password",
+  authenticated,
+  async ({ body, user, response }) => {
+    try {
+      const { currentPassword, newPassword } = body;
+
+      if (!currentPassword || !newPassword) {
+        return response.status(400).send("Current and new passwords are required");
+      }
+
+      if (currentPassword === newPassword) {
+        return response.status(400).send("New password cannot be the same as current password");
+      }
+
+      if (!updatePasswordSchema.safeParse(body).success) {
+        return response.status(400).json({
+          message: "Validation failed",
+          errors: updatePasswordSchema.safeParse(body).error.flatten(),
+        });
+      }
+
+      if (user.role === Role.WORKER) {
+        const worker = await dbClient.query.workers.findFirst({
+          where: eq(workers.workerId, user.workerId),
+        });
+
+        if (!worker) {
+          return response.status(404).send("Worker not found");
+        }
+
+        const passwordCorrect = await verify(worker.password, currentPassword, argon2Config);
+        if (!passwordCorrect) {
+          return response.status(401).send("Current password is incorrect");
+        }
+
+        const hashedNewPassword = await argon2hash(newPassword, argon2Config);
+
+        await dbClient
+          .update(workers)
+          .set({ password: hashedNewPassword, updatedAt: new Date() })
+          .where(eq(workers.workerId, user.workerId));
+
+        return response.status(200).send("Password updated successfully");
+
+      } else if (user.role === Role.EMPLOYER) {
+        const employer = await dbClient.query.employers.findFirst({
+          where: eq(employers.employerId, user.employerId),
+        });
+
+        if (!employer) {
+          return response.status(404).send("Employer not found");
+        }
+
+        const passwordCorrect = await verify(employer.password, currentPassword, argon2Config);
+        if (!passwordCorrect) {
+          return response.status(401).send("Current password is incorrect");
+        }
+
+        const hashedNewPassword = await argon2hash(newPassword, argon2Config);
+
+        await dbClient
+          .update(employers)
+          .set({ password: hashedNewPassword, updatedAt: new Date() })
+          .where(eq(employers.employerId, user.employerId));
+
+        return response.status(200).send("Password updated successfully");
+
+      } else {
+        return response.status(400).send("Invalid user role for password update");
+      }
+    } catch (error) {
+      console.error("Error updating password:", error);
+      return response.status(500).send("Internal server error");
+    }
+  }
+)
+
 router.put(
   "/update/identification",
   authenticated,
@@ -445,10 +525,20 @@ router.put(
   "/update/profilePhoto",
   authenticated,
   uploadProfilePhoto,
-  async ({ headers, file: reqFile, user, response }) => {
+  async ({ headers, file: reqFile, user, response , body}) => {
     try {
-      if (reqFile.length === 0) {
-        return response.status(400).send("No file uploaded");
+     
+      if (reqFile.profilePhoto === null || body.deleteProfilePhoto === "true") {
+        if(user.employerPhoto == null)return response.status(200).send("No profile photo to delete");
+        await s3Client.delete(`profile-photos/employers/${user.employerPhoto.r2Name}`);
+        await dbClient
+          .update(employers)
+          .set({
+            employerPhoto: null,
+            updatedAt: new Date(),
+          })
+          .where(eq(employers.employerId, user.employerId));
+        return response.status(200).send("Profile photo deleted successfully");
       }
 
       const filesInfo: {
@@ -462,6 +552,19 @@ router.put(
       }
 
       if (user.role === "worker" && headers.get("platform") === "mobile") {
+        if (reqFile.profilePhoto === null || body.deleteProfilePhoto === "true") {
+          if (user.profilePhoto == null) return response.status(200).send("No profile photo to delete");
+          await s3Client.delete(`profile-photos/workers/${user.profilePhoto.r2Name}`);
+          await dbClient
+            .update(workers)
+            .set({
+              profilePhoto: null,
+              updatedAt: new Date(),
+            })
+            .where(eq(workers.workerId, user.workerId));
+          return response.status(200).send("Profile photo deleted successfully");
+        }
+        
         if (user.profilePhoto?.r2Name) {
           await s3Client.delete(`profile-photos/workers/${user.profilePhoto.r2Name}`);
         }
@@ -483,6 +586,18 @@ router.put(
 
       }
       if (user.role === "employer" && headers.get("platform") === "web-employer") {
+        if (reqFile.profilePhoto === null || body.deleteProfilePhoto === "true") {
+          if (user.employerPhoto == null) return response.status(200).send("No profile photo to delete");
+          await s3Client.delete(`profile-photos/employers/${user.employerPhoto.r2Name}`);
+          await dbClient
+            .update(employers)
+            .set({
+            employerPhoto: null,
+            updatedAt: new Date(),
+          })
+          .where(eq(employers.employerId, user.employerId));
+        return response.status(200).send("Profile photo deleted successfully");
+      }
         if (user.employerPhoto?.r2Name) {
           await s3Client.delete(`profile-photos/employers/${user.employerPhoto.r2Name}`);
         }
@@ -505,9 +620,12 @@ router.put(
 
       return response.status(400).send("Platform requiered or mismatch");
     } catch (error) {
+      console.error("Error updating profile photo:", error);
       return response.status(500).send("Internal server error");
     } finally {
-      cleanupTempFiles([reqFile.profilePhoto]);
+      if( reqFile.profilePhoto ){
+        cleanupTempFiles([reqFile.profilePhoto]);
+      }
     }
   }
 );
