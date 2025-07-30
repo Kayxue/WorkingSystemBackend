@@ -209,17 +209,26 @@ router.post(
   },
 );
 
-router.post(
-  "/login",
-  passport.authenticate("local"),
-  ({ response, user, sessionID }) => {
-    response.cookie(
-      "connect.sid",
-      `s:${signature.sign(sessionID, process.env.SESSIONSECRET)}`,
-    );
-    return user;
-  },
-);
+router.post("/login", (rev, next) => {
+  passport.authenticate("local", (error,user,info) => {
+    if (error) return next(error);
+    if (!user) {
+      console.error("Authentication failed:", info);
+      return rev.response.status(401).send(info?.message || "Authentication failed");
+    }
+
+    rev.logIn(user, (err) => {
+      if (err) return next(err);
+
+      rev.response.cookie(
+        "connect.sid",
+        `s:${signature.sign(rev.sessionID, process.env.SESSIONSECRET)}`
+      );
+
+      return rev.response.status(200).send({user});
+    });
+  })(rev, next);
+});
 
 router.get("/logout", ({ response, session }) => {
   session.destroy();
