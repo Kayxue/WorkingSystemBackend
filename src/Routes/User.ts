@@ -25,13 +25,13 @@ import { requireEmployer } from "../Middleware/guards";
 const router = new Hono<HonoGenericContext>();
 
 // Worker Registration
-router.post("/register/worker", zValidator("json", workerSignupSchema), async (c) => {
+router.post("/register/worker", zValidator("form", workerSignupSchema), async (c) => {
   const platform = c.req.header("platform");
   if (!platform?.length) {
     return c.text("Platform is required", 400);
   }
 
-  const body = c.req.valid("json");
+  const body = c.req.valid("form");
   const {
     email,
     password,
@@ -93,20 +93,11 @@ router.post("/register/worker", zValidator("json", workerSignupSchema), async (c
 });
 
 // Employer Registration
-router.post("/register/employer", uploadDocument, zValidator("json", employerSignupSchema), async (c) => {
+router.post("/register/employer", uploadDocument, zValidator("form", employerSignupSchema), async (c) => {
   const uploadedFiles = c.get("uploadedFiles") as any[];
-  const body = c.req.valid("json");
-
-  let files = null;
-  if (body.identificationType === "businessNo" && uploadedFiles?.find((f) => f.fieldName === "verficationDocument")) {
-    const verficationFiles = uploadedFiles.filter((f) => f.fieldName === "verficationDocument");
-    files = verficationFiles.length === 1 ? [verficationFiles[0]] : verficationFiles;
-  } else if (body.identificationType === "personalId" && uploadedFiles?.find((f) => f.fieldName === "identificationDocument")) {
-    const identificationFiles = uploadedFiles.filter((f) => f.fieldName === "identificationDocument");
-    files = identificationFiles.length === 1 ? [identificationFiles[0]] : identificationFiles;
-  } else {
-    return c.text("Invalid identification document", 400);
-  }
+  const body = c.req.valid("form");
+  const fileType = (body.identificationType === "businessNo") ? "verficationDocument" : "identificationDocument";
+  const files = uploadedFiles[fileType] || [];
 
   try {
     const platform = c.req.header("platform");
@@ -190,6 +181,21 @@ router.post("/register/employer", uploadDocument, zValidator("json", employerSig
     // 清理臨時文件
     FileManager.cleanupTempFiles(files);
   }
+});
+
+// delete user
+router.delete("/delete", authenticated, async (c) => {
+  const user = c.get("user");
+  if (user.role === Role.WORKER) {
+    await dbClient.delete(workers).where(eq(workers.workerId, user.workerId));
+    await UserCache.clearUserProfile(user.workerId, Role.WORKER);
+    return c.text("Worker account deleted successfully", 200);
+  } else if (user.role === Role.EMPLOYER) {
+    await dbClient.delete(employers).where(eq(employers.employerId, user.employerId));
+    await UserCache.clearUserProfile(user.employerId, Role.EMPLOYER);
+    return c.text("Employer account deleted successfully", 200);
+  }
+  return c.text("Invalid user role for deletion", 400);
 });
 
 router.post("/login", zValidator("json", loginSchema), authenticate, async (c) => {
@@ -649,7 +655,7 @@ router.put("/update/profilePhoto", authenticated, uploadProfilePhoto, async (c) 
       return c.text("worker profile photo updated successfully", 200);
 
     } else if (user.role == Role.EMPLOYER) {
-      // if (user.employerPhoto != null){await s3Client.delete(`profile-photos/employers/${user.employerPhoto.r2Name}`);}
+      if (user.employerPhoto != null){await s3Client.delete(`profile-photos/employers/${user.employerPhoto.r2Name}`);}
       await s3Client.write(`profile-photos/employers/${photoFile.filename}`, currentFile);
       
       await dbClient
