@@ -68,7 +68,13 @@ export const updateWorkerProfileSchema = z.object({
   schoolName: z.string().optional(),
   major: z.string().optional(),
   studyStatus: z.enum(["就讀中", "已畢業", "肄業"]).optional(),
-  certificates: z.array(z.string()).optional(),
+  certificates: z.array(z
+    .enum(["普通小型車", "職業小型車", "普通大貨車", "職業大貨車",
+      "普通大客車", "職業大客車", "普通聯結車", "職業聯結車",
+      "小型輕型機車", "普通輕型機車", "普通重型機車", "大型重型機車"
+    ])
+  ).optional(),
+  jobExperience: z.array(z.string()).optional(),
 });
 
 export const updateEmployerProfileSchema = z.object({
