@@ -38,11 +38,12 @@ router.post("/register/worker", zValidator("json", workerSignupSchema), async (c
     firstName,
     lastName,
     phoneNumber,
-    highestEducation = "大學",
+    highestEducation = "其他",
     schoolName,
     major,
     studyStatus = "就讀中",
     certificates = [],
+    jobExperience = [],
   } = body;
 
   const existingUser = await dbClient.query.workers.findFirst({
@@ -68,6 +69,7 @@ router.post("/register/worker", zValidator("json", workerSignupSchema), async (c
       major,
       studyStatus,
       certificates,
+      jobExperience,
     })
     .returning();
 
@@ -600,94 +602,73 @@ router.put("/update/identification", authenticated, uploadDocument, async (c) =>
 
 // Update Profile Photo
 router.put("/update/profilePhoto", authenticated, uploadProfilePhoto, async (c) => {
+  
+  const user = c.get("user");
+  const uploadedFilesObj = c.get("uploadedFiles") as Record<string, any>;
+  const body = await c.req.parseBody();
+  
+  const photoFile = uploadedFilesObj.profilePhoto;
+  const photoData = {
+    originalName: photoFile.name,
+    type: photoFile.type,
+    r2Name: photoFile.filename, // 使用 r2Name 而不是 filename
+  };
+  // return c.text("user r2name:", user.employerPhoto?.r2Name);
+
+
   try {
-    const user = c.get("user");
-    const uploadedFilesObj = c.get("uploadedFiles") as Record<string, any>;
-
-    if (!uploadedFilesObj || !uploadedFilesObj.profilePhoto) {
-      return c.text("沒有上傳照片", 400);
+    if (photoFile.length == 0 && body.deleteProfilePhoto == "true") {
+      if (user.employerPhoto == null) return c.text("No profile photo to delete", 200);
+      await s3Client.delete(`profile-photos/${user.role}s/${user.employerPhoto.r2Name}`);
+      await dbClient
+        .update(employers)
+        .set({
+          employerPhoto: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(employers.employerId, user.employerId));
+      return c.text("個人照片已刪除", 200);
     }
 
-    const photoFile = uploadedFilesObj.profilePhoto; // profilePhoto 是單個檔案
+    const currentFile = Bun.file(photoFile.path);
 
-    // 驗證檔案物件的完整性
-    if (!photoFile || !photoFile.filename || !photoFile.name || !photoFile.path) {
-      console.error('❌ 個人照片檔案物件不完整:', photoFile);
-      return c.text("檔案資料不完整", 400);
-    }
-
-    console.log('✅ 個人照片檔案資料:', {
-      name: photoFile.name,
-      filename: photoFile.filename,
-      type: photoFile.type,
-      size: photoFile.size
-    });
-
-    // 上傳照片到 S3
-    try {
-      const currentFile = Bun.file(photoFile.path);
-
-      // 檢查檔案是否存在
-      if (!(await currentFile.exists())) {
-        throw new Error(`檔案不存在: ${photoFile.path}`);
-      }
-
-      // 根據用戶角色決定上傳路徑
-      const uploadPath = user.role === Role.WORKER
-        ? `profile-photos/workers/${photoFile.filename}`
-        : `profile-photos/employers/${photoFile.filename}`;
-
-      await s3Client.write(uploadPath, currentFile);
-      console.log(`個人照片 ${photoFile.name} 上傳成功`);
-    } catch (uploadError) {
-      console.error("上傳個人照片時出錯:", uploadError);
-      FileManager.cleanupTempFiles([photoFile]);
-      return c.text("照片上傳失敗", 500);
-    }
-
-    const photoData = {
-      originalName: photoFile.name,
-      type: photoFile.type,
-      r2Name: photoFile.filename, // 使用 r2Name 而不是 filename
-    };
-
-    // 驗證 photoData 不包含 URL
-    if (photoData.r2Name && (photoData.r2Name.includes('http') || photoData.r2Name.includes('presigned'))) {
-      console.error('❌ 檢測到嘗試儲存 URL 到資料庫:', photoData);
-      return c.text("檔案資料格式錯誤", 400);
-    }
-
-    // 根據用戶角色更新對應的照片
-    if (user.role === Role.WORKER) {
+    if (user.role == Role.WORKER) {
+      await s3Client.delete(`profile-photos/workers/${user.profilePhoto.r2Name}`);
+      await s3Client.write(`profile-photos/workers/${photoFile.filename}`, currentFile);
       await dbClient
         .update(workers)
         .set({
-          profilePhoto: photoData,
+          profilePhoto: {
+            originalName: "hello",
+            type: "hello",
+            r2Name: "hello",
+          },
           updatedAt: new Date(),
         })
         .where(eq(workers.workerId, user.userId));
-    } else if (user.role === Role.EMPLOYER) {
+      return c.text("worker profile photo updated successfully", 200);
+
+    } else if (user.role == Role.EMPLOYER) {
+      // if (user.employerPhoto != null){await s3Client.delete(`profile-photos/employers/${user.employerPhoto.r2Name}`);}
+      await s3Client.write(`profile-photos/employers/${photoFile.filename}`, currentFile);
+      
       await dbClient
         .update(employers)
         .set({
           employerPhoto: photoData,
           updatedAt: new Date(),
         })
-        .where(eq(employers.employerId, user.userId));
-    } else {
-      return c.text("無效的用戶角色", 400);
+        .where(eq(employers.employerId, user.employerId));
+      
+      return c.text("employer profile photo updated successfully", 200);
     }
-
-    // 清理臨時文件
-    FileManager.cleanupTempFiles([photoFile]);
-
-    return c.json({
-      message: "個人照片更新成功",
-      photo: photoData,
-    });
+    return c.text("invalid role", 400);
   } catch (error) {
     console.error("更新個人照片時出錯:", error);
     return c.text("伺服器內部錯誤", 500);
+  } finally {
+    if (photoFile.length > 0) FileManager.cleanupTempFiles([photoFile]);
+    await UserCache.clearUserProfile(user.employerId, Role.EMPLOYER);
   }
 });
 

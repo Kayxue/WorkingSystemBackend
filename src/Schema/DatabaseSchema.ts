@@ -30,7 +30,7 @@ export const workers = pgTable("workers", {
   highestEducation: varchar("highest_education", {
     // 依需求可調整枚舉內容，如 "高中", "大專", "大學", "碩士", "博士", "其他"
     enum: ["高中", "大學", "碩士", "博士", "其他"],
-  }).default("大學"),
+  }).default("其他"),
   schoolName: text("school_name"), // 學校名稱
   major: text("major"), // 就讀科系
   studyStatus: varchar("study_status", {
