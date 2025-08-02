@@ -312,6 +312,38 @@ router.get("/profile", authenticated, async (c) => {
       }
     }
 
+    let documentsWithUrls = [];
+
+    if (user.verificationDocuments && Array.isArray(user.verificationDocuments)) {
+      documentsWithUrls = await Promise.all(
+        user.verificationDocuments.map(async (doc: any, index: number) => {
+          if (!doc || !doc.r2Name) {
+            console.warn(`驗證文件 ${index} 缺少 r2Name 屬性:`, doc);
+            return {
+              ...doc,
+              presignedUrl: null,
+              error: "文件資料不完整"
+            };
+          }
+
+          const presignedUrl = await FileManager.getPresignedUrl(`identification/${user.userId}/${doc.r2Name}`);
+
+          if (presignedUrl) {
+            return { ...doc, presignedUrl };
+          } else {
+            console.warn(`❌ 驗證文件 URL 生成失敗: ${doc.r2Name}`);
+            return {
+              ...doc,
+              presignedUrl: null,
+              error: "URL 生成失敗"
+            };
+          }
+        })
+      );
+    } else {
+      console.log(`Employer ${user.userId} 沒有驗證文件或格式不正確`);
+    }
+
     let ratingStats = await RatingCache.getRatingStats(user.employerId, Role.EMPLOYER);
 
     if (!ratingStats) {
@@ -334,7 +366,7 @@ router.get("/profile", authenticated, async (c) => {
     return c.json({
       ...employerData,
       employerPhoto: photoUrlData,
-      verificationDocuments,
+      verificationDocuments: documentsWithUrls,
       ratingStats,
     });
   }
@@ -563,10 +595,8 @@ router.put("/update/profilePhoto", authenticated, uploadProfilePhoto, async (c) 
   const photoData = {
     originalName: photoFile.name,
     type: photoFile.type,
-    r2Name: photoFile.filename, // 使用 r2Name 而不是 filename
+    r2Name: photoFile.filename,
   };
-  // return c.text("user r2name:", user.employerPhoto?.r2Name);
-
 
   try {
     if (photoFile.length == 0 && body.deleteProfilePhoto == "true") {
@@ -591,9 +621,9 @@ router.put("/update/profilePhoto", authenticated, uploadProfilePhoto, async (c) 
         .update(workers)
         .set({
           profilePhoto: {
-            originalName: "hello",
-            type: "hello",
-            r2Name: "hello",
+            originalName: photoData.originalName,
+            type: photoData.type,
+            r2Name: photoData.r2Name,
           },
           updatedAt: new Date(),
         })
@@ -621,72 +651,6 @@ router.put("/update/profilePhoto", authenticated, uploadProfilePhoto, async (c) 
   } finally {
     if (photoFile.length > 0) FileManager.cleanupTempFiles([photoFile]);
     await UserCache.clearUserProfile(user.employerId, Role.EMPLOYER);
-  }
-});
-
-// Get Employer Verification Documents
-router.get("/employer/verification-documents", authenticated, requireEmployer, async (c) => {
-  try {
-    const user = c.get("user");
-    const employer = await dbClient.query.employers.findFirst({
-      where: eq(employers.employerId, user.userId),
-      columns: {
-        password: false, // 排除密碼
-      },
-    });
-
-    if (!employer) {
-      return c.text("雇主不存在", 404);
-    }
-
-    // 獲取驗證文件的預簽名 URL
-    let documentsWithUrls = [];
-
-    if (employer.verificationDocuments && Array.isArray(employer.verificationDocuments)) {
-      console.log(`正在為 employer ${user.userId} 處理 ${employer.verificationDocuments.length} 個驗證文件`);
-      documentsWithUrls = await Promise.all(
-        employer.verificationDocuments.map(async (doc: any, index: number) => {
-          if (!doc || !doc.r2Name) {
-            console.warn(`驗證文件 ${index} 缺少 r2Name 屬性:`, doc);
-            return {
-              ...doc,
-              presignedUrl: null,
-              error: "文件資料不完整"
-            };
-          }
-
-          const presignedUrl = await FileManager.getPresignedUrl(`identification/${user.userId}/${doc.r2Name}`);
-
-          if (presignedUrl) {
-            return { ...doc, presignedUrl };
-          } else {
-            console.warn(`❌ 驗證文件 URL 生成失敗: ${doc.r2Name}`);
-            return {
-              ...doc,
-              presignedUrl: null,
-              error: "URL 生成失敗"
-            };
-          }
-        })
-      );
-    } else {
-      console.log(`Employer ${user.userId} 沒有驗證文件或格式不正確`);
-    }
-
-    return c.json({
-      employerId: employer.employerId,
-      employerName: employer.employerName,
-      branchName: employer.branchName,
-      industryType: employer.industryType,
-      approvalStatus: employer.approvalStatus,
-      identificationType: employer.identificationType,
-      identificationNumber: employer.identificationNumber,
-      verificationDocuments: documentsWithUrls,
-      employerPhoto: employer.employerPhoto,
-    });
-  } catch (error) {
-    console.error("獲取雇主驗證文件時出錯:", error);
-    return c.text("伺服器內部錯誤", 500);
   }
 });
 
