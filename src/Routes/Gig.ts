@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { authenticated } from "../Middleware/authentication";
-import { requireEmployer, requireApprovedEmployer } from "../Middleware/guards";
+import { requireEmployer, requireApprovedEmployer, requireWorker } from "../Middleware/guards";
 import type IRouter from "../Interfaces/IRouter";
 import type { HonoGenericContext } from "../Types/types";
 import dbClient from "../Client/DrizzleClient";
@@ -355,8 +355,8 @@ router.get("/public/:gigId", async (c) => {
     const userId = session.get("id");
     const role = session.get("role");
     let applicationStatus: string | null;
-    let conflictingGigs: any[] = [];
-    let conflictingPendingApplications: any[] = [];
+    let hasConflict = false;
+    let hasPendingConflict = false;
 
     if (userId && role === Role.WORKER) {
       // 查找該打工者對此工作的申請狀態
@@ -370,77 +370,145 @@ router.get("/public/:gigId", async (c) => {
         },
       });
 
-      // 檢查衝突的已確認工作
+      if (application) {
+        applicationStatus = application.status;
+      }
+
+      // 檢查是否有時間衝突（已確認的工作）
       const conflictCheck = await ApplicationConflictChecker.checkWorkerScheduleConflict(
         userId,
         gigId
       );
 
-      if (conflictCheck.hasConflict) {
-        conflictingGigs = conflictCheck.conflictingGigs.map(conflict => ({
-          gigId: conflict.gigId,
-          title: conflict.title,
-          dateStart: DateUtils.formatDate(conflict.dateStart),
-          dateEnd: DateUtils.formatDate(conflict.dateEnd),
-          timeStart: conflict.timeStart,
-          timeEnd: conflict.timeEnd,
-        }));
-      }
+      hasConflict = conflictCheck.hasConflict;
 
-      if (application) {
-        applicationStatus = application.status;
+      // 檢查申請的衝突
+      const conflictingApplicationIds = await ApplicationConflictChecker.getConflictingPendingApplications(
+        userId,
+        gigId
+      );
 
-        if (applicationStatus === "pending_worker_confirmation") {
-          // 獲取衝突的待確認申請
-          const conflictingApplicationIds = await ApplicationConflictChecker.getConflictingPendingApplications(
-            userId,
-            gigId
-          );
-
-          if (conflictingApplicationIds.length > 0) {
-            // 查詢衝突的申請詳細資訊
-            const conflictingApps = await dbClient.query.gigApplications.findMany({
-              where: inArray(gigApplications.applicationId, conflictingApplicationIds),
-              with: {
-                gig: {
-                  columns: {
-                    gigId: true,
-                    title: true,
-                    dateStart: true,
-                    dateEnd: true,
-                    timeStart: true,
-                    timeEnd: true,
-                  },
-                },
-              },
-            });
-
-            conflictingPendingApplications = conflictingApps.map(app => ({
-              applicationId: app.applicationId,
-              gigId: app.gig.gigId,
-              title: app.gig.title,
-              dateStart: DateUtils.formatDate(app.gig.dateStart),
-              dateEnd: DateUtils.formatDate(app.gig.dateEnd),
-              timeStart: app.gig.timeStart,
-              timeEnd: app.gig.timeEnd,
-              status: app.status,
-            }));
-          }
-        }
-      }
+      hasPendingConflict = conflictingApplicationIds.length > 0;
     }
 
     const formattedGig = {
       ...gig,
       environmentPhotos: await formatEnvironmentPhotos(gig.environmentPhotos),
       applicationStatus,
-      conflictingGigs: conflictingGigs.length > 0 ? conflictingGigs : undefined,
-      conflictingPendingApplications: conflictingPendingApplications.length > 0 ? conflictingPendingApplications : undefined,
+      hasConflict,
+      hasPendingConflict,
     };
 
     return c.json(formattedGig, 200);
   } catch (error) {
     console.error(`獲取詳細工作時出錯:`, error);
+    return c.text("伺服器內部錯誤", 500);
+  }
+});
+
+// Worker 獲取衝突的工作
+router.get("/public/:gigId/conflicts", authenticated, requireWorker, async (c) => {
+  try {
+    const user = c.get("user");
+    const gigId = c.req.param("gigId");
+
+    if (!gigId) {
+      return c.json({ error: "Gig ID is required" }, 400);
+    }
+
+    const today = DateUtils.getCurrentDate();
+
+    // 檢查工作是否存在且可用
+    const whereConditions = [
+      eq(gigs.gigId, gigId),
+      eq(gigs.isActive, true),
+      sql`(${gigs.unlistedAt} IS NULL OR ${gigs.unlistedAt} >= ${today})`,
+    ];
+
+    const gig = await dbClient.query.gigs.findFirst({
+      where: and(...whereConditions),
+      columns: {
+        gigId: true,
+        title: true,
+        dateStart: true,
+        dateEnd: true,
+        timeStart: true,
+        timeEnd: true,
+      },
+    });
+
+    if (!gig) {
+      return c.json({ message: "工作不存在或目前無法查看" }, 404);
+    }
+
+    // 檢查與已確認工作的衝突
+    const confirmedConflictCheck = await ApplicationConflictChecker.checkWorkerScheduleConflict(
+      user.workerId,
+      gigId
+    );
+
+    const conflictingConfirmedGigs = confirmedConflictCheck.hasConflict
+      ? confirmedConflictCheck.conflictingGigs.map(conflict => ({
+          gigId: conflict.gigId,
+          title: conflict.title,
+          dateStart: DateUtils.formatDate(conflict.dateStart),
+          dateEnd: DateUtils.formatDate(conflict.dateEnd),
+          timeStart: conflict.timeStart,
+          timeEnd: conflict.timeEnd,
+        }))
+      : [];
+
+    // 檢查與待處理申請的衝突
+    const conflictingApplicationIds = await ApplicationConflictChecker.getConflictingPendingApplications(
+      user.workerId,
+      gigId
+    );
+
+    let conflictingPendingApplications = [];
+
+    if (conflictingApplicationIds.length > 0) {
+      const conflictingApps = await dbClient.query.gigApplications.findMany({
+        where: inArray(gigApplications.applicationId, conflictingApplicationIds),
+        with: {
+          gig: {
+            columns: {
+              gigId: true,
+              title: true,
+              dateStart: true,
+              dateEnd: true,
+              timeStart: true,
+              timeEnd: true,
+            },
+          },
+        },
+      });
+
+      conflictingPendingApplications = conflictingApps.map(app => ({
+        applicationId: app.applicationId,
+        gigId: app.gig.gigId,
+        title: app.gig.title,
+        dateStart: DateUtils.formatDate(app.gig.dateStart),
+        dateEnd: DateUtils.formatDate(app.gig.dateEnd),
+        timeStart: app.gig.timeStart,
+        timeEnd: app.gig.timeEnd,
+        status: app.status,
+      }));
+    }
+
+    return c.json({
+      gig: {
+        gigId: gig.gigId,
+        title: gig.title,
+        dateStart: DateUtils.formatDate(gig.dateStart),
+        dateEnd: DateUtils.formatDate(gig.dateEnd),
+        timeStart: gig.timeStart,
+        timeEnd: gig.timeEnd,
+      },
+      confirmedGigs: conflictingConfirmedGigs,
+      pendingApplications: conflictingPendingApplications,
+    }, 200);
+  } catch (error) {
+    console.error(`獲取工作衝突資訊時出錯:`, error);
     return c.text("伺服器內部錯誤", 500);
   }
 });
