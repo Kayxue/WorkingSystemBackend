@@ -190,7 +190,15 @@ router.get("/my-applications", authenticated, requireWorker, async (c) => {
       "system_cancelled"
     ];
 
-    if (status && validStatuses.includes(status)) {
+    if (status && status === "inactive") {
+      // employer_rejected,worker_declined,worker_cancelled,system_cancelled
+      whereConditions.push(or(
+        eq(gigApplications.status, "employer_rejected"),
+        eq(gigApplications.status, "worker_declined"),
+        eq(gigApplications.status, "worker_cancelled"),
+        eq(gigApplications.status, "system_cancelled")
+      ));
+    } else if (status && validStatuses.includes(status)) {
       whereConditions.push(eq(gigApplications.status, status as any));
     }
 
