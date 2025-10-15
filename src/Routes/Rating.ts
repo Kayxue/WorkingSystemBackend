@@ -131,8 +131,8 @@ router.post(
       // 檢查是否已經評分過
       const existingRating = await dbClient.query.employerRatings.findFirst({
         where: and(
-          eq(employerRatings.gigId, gigId), 
-          eq(employerRatings.workerId, workerId), 
+          eq(employerRatings.gigId, gigId),
+          eq(employerRatings.workerId, workerId),
           eq(employerRatings.employerId, employerId)
         ),
         columns: {
@@ -145,7 +145,7 @@ router.post(
           message: "您已經對這個商家評分過了",
         }, 400);
       }
-      
+
       // 直接查詢符合所有條件的記錄，並檢查工作是否已結束
       const currentDate = DateUtils.getCurrentDate(); // YYYY-MM-DD 格式
       const validGig = await dbClient.query.gigs.findFirst({
@@ -215,7 +215,7 @@ router.post(
  */
 router.get("/worker/:workerId", authenticated, requireEmployer, requireApprovedEmployer, async (c) => {
   try {
-        const workerId = c.req.param("workerId");
+    const workerId = c.req.param("workerId");
 
     // 驗證打工者是否存在
     const worker = await dbClient.query.workers.findFirst({
@@ -270,7 +270,7 @@ router.get("/worker/:workerId", authenticated, requireEmployer, requireApprovedE
  */
 router.get("/employer/:employerId", authenticated, requireWorker, async (c) => {
   try {
-        const employerId = c.req.param("employerId");
+    const employerId = c.req.param("employerId");
 
     // 驗證商家是否存在
     const employer = await dbClient.query.employers.findFirst({
@@ -806,23 +806,21 @@ router.get("/list/worker", authenticated, requireWorker, async (c) => {
     const returnGigs = hasMore ? ratableGigs.slice(0, requestLimit) : ratableGigs;
 
     return c.json({
-      data: {
-        ratableGigs: returnGigs.map((gig) => ({
-          gigId: gig.gigId,
-          title: gig.title,
-          startDate: gig.dateStart,
-          endDate: gig.dateEnd,
-          employer: {
-            employerId: gig.employerId,
-            name: gig.branchName ? `${gig.employerName} - ${gig.branchName}` : gig.employerName,
-          },
-        })),
-        pagination: {
-          limit: requestLimit,
-          offset: requestOffset,
-          hasMore,
-          returned: returnGigs.length,
+      ratableGigs: returnGigs.map((gig) => ({
+        gigId: gig.gigId,
+        title: gig.title,
+        startDate: gig.dateStart,
+        endDate: gig.dateEnd,
+        employer: {
+          employerId: gig.employerId,
+          name: gig.branchName ? `${gig.employerName} - ${gig.branchName}` : gig.employerName,
         },
+      })),
+      pagination: {
+        limit: requestLimit,
+        offset: requestOffset,
+        hasMore,
+        returned: returnGigs.length,
       },
     }, 200);
   } catch (error) {
