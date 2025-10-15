@@ -18,9 +18,9 @@ import { Role } from "../Types/types";
 const router = new Hono<HonoGenericContext>();
 
 async function getGigStatus(gig: {
-  publishedAt: string;
   unlistedAt: string | null;
   isActive: boolean;
+  dateStart: string;
   dateEnd: string;
 }): Promise<string> {
   const today = DateUtils.getCurrentDate();
@@ -35,14 +35,34 @@ async function getGigStatus(gig: {
     return "已結束";
   }
   
-  // 3. 已下架 (手動下架)
-  if (gig.unlistedAt && DateUtils.formatDate(gig.unlistedAt) <= today) {
-    return "已下架";
+  // 3. 已下架并且正在進行中 (手動下架)
+  if (gig.unlistedAt && gig.unlistedAt !== null && DateUtils.formatDate(gig.dateStart) <= today) {
+    return "已下架,正在進行";
+  }
+
+  // 4. 已下架并且未開始 (手動下架)
+  if (gig.unlistedAt && gig.unlistedAt !== null && DateUtils.formatDate(gig.dateStart) > today) {
+    return "已下架,未開始";
   }
   
-  // 4. 已刊登 (正常運行)
-  if (DateUtils.formatDate(gig.publishedAt) <= today) {
-    return "已刊登";
+  // 5. 已刊登並且正在進行中 (正常運行)
+  if (gig.unlistedAt === null && DateUtils.formatDate(gig.dateStart) <= today) {
+    return "已刊登,正在進行";
+  }
+
+  // 6. 已刊登但未開始 (正常運行)
+  if (gig.unlistedAt === null && DateUtils.formatDate(gig.dateStart) > today) {
+    return "已刊登,未開始";
+  }
+
+  // 7. 未開始并且已上架
+  if (gig.unlistedAt === null && DateUtils.formatDate(gig.dateStart) > today) {
+    return "已刊登,未開始";
+  }
+
+  // 8. 未開始并且已下架
+  if (gig.unlistedAt && DateUtils.formatDate(gig.unlistedAt) <= today && DateUtils.formatDate(gig.dateStart) > today) {
+    return "未開始,未上架";
   }
   
   return "未開始";
@@ -188,7 +208,7 @@ function buildGigData(body: any, user: any, environmentPhotosInfo: any) {
     ...body,
     dateStart: DateUtils.formatDate(dateStart),
     dateEnd: DateUtils.formatDate(dateEnd),
-    publishedAt: DateUtils.formatDate(dateStart),
+    publishedAt: DateUtils.formatDate(body.publishedAt),
     environmentPhotos: environmentPhotosInfo ? environmentPhotosInfo : null,
   };
 }
@@ -239,7 +259,7 @@ router.get("/public", async (c) => {
     // 建立查詢條件
     const whereConditions = [
       eq(gigs.isActive, true),
-      sql`(${gigs.unlistedAt} IS NULL OR ${gigs.unlistedAt} >= ${today})`,
+      sql`(${gigs.unlistedAt} IS NULL)`,
       gte(gigs.dateEnd, searchDateStart),
     ];
 
@@ -647,9 +667,9 @@ router.get("/my-gigs", authenticated, requireEmployer, async (c) => {
         unlistedAt: gig.unlistedAt ? DateUtils.formatDate(gig.unlistedAt) : null,
         environmentPhotos: await formatEnvironmentPhotos(gig.environmentPhotos, 1),
         status: await getGigStatus({
-          publishedAt: gig.publishedAt,
           unlistedAt: gig.unlistedAt,
           isActive: gig.isActive,
+          dateStart: gig.dateStart,
           dateEnd: gig.dateEnd,
         }),
       }))
@@ -711,9 +731,9 @@ router.get("/:gigId", authenticated, requireEmployer, async (c) => {
     }
 
     const gigStatus = await getGigStatus({
-      publishedAt: gig.publishedAt,
       unlistedAt: gig.unlistedAt,
       isActive: gig.isActive,
+      dateStart: gig.dateStart,
       dateEnd: gig.dateEnd,
     });
 
@@ -1016,13 +1036,6 @@ router.patch("/:gigId/toggle-listing", authenticated, requireEmployer, requireAp
     }
     
     const isCurrentlyListed = !existingGig.unlistedAt || existingGig.unlistedAt >= today;
-
-    // 如果要下架工作，檢查是否已發佈
-    if (isCurrentlyListed) {
-      if (DateUtils.formatDate(existingGig.publishedAt) > today) {
-        return c.text("工作尚未發佈，無法下架", 400);
-      }
-    }
 
     const newUnlistedAt = isCurrentlyListed ? today : null;
 
