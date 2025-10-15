@@ -584,8 +584,10 @@ router.get("/my-gigs", authenticated, requireEmployer, async (c) => {
     const whereConditions = [eq(gigs.employerId, user.employerId)];
 
     // 根據狀態參數添加日期條件
-    if (status && ["not_started", "ongoing", "completed", "closed", "unpublished"].includes(status)) {
-      if (status === "not_started") {
+    if (status && ["published","not_started", "ongoing", "completed", "closed", "unpublished"].includes(status)) {
+      if (status === "published") {
+        whereConditions.push(lte(gigs.publishedAt, currentDate), eq(gigs.isActive, true), sql`(${gigs.unlistedAt} IS NULL)`);
+      } else if (status === "not_started") {
         // 未開始：dateStart > currentDate 且 isActive = true
         whereConditions.push(gt(gigs.dateStart, currentDate), eq(gigs.isActive, true));
       } else if (status === "completed") {
