@@ -767,10 +767,9 @@ router.get("/list/employer/gig/:gigId", authenticated, requireEmployer, requireA
 router.get("/list/worker", authenticated, requireWorker, async (c) => {
   try {
     const user = c.get("user");
-    const limit = c.req.query("limit") || "10";
-    const offset = c.req.query("offset") || "0";
-    const requestLimit = Number.parseInt(limit);
-    const requestOffset = Number.parseInt(offset);
+    const page = c.req.query("page")
+    const requestLimit = 10;
+    const requestOffset = requestLimit * (Number.parseInt(page) - 1) || 0;
     const workerId = user.workerId;
     const currentDate = DateUtils.getCurrentDate();
 
