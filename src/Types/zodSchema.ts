@@ -429,7 +429,7 @@ export const updateAttendanceRecordSchema = z.object({
     z.object({
       recordId: z.string().min(1, "記錄ID不能為空"),
       status: z.enum(["on_time", "late", "early"]).optional(),
-      attendanceConfirmation: z.enum(["pending", "confirmed", "rejected"]).optional(),
+      attendanceConfirmation: z.enum(["confirmed", "rejected"]).optional(),
       notes: z.string().max(500, "備註不能超過500字").optional(),
     }).refine((data) => {
       return data.status || data.attendanceConfirmation || data.notes;
