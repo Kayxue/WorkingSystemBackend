@@ -4,7 +4,7 @@ import { requireApprovedEmployer, requireEmployer, requireWorker } from "../Midd
 import type IRouter from "../Interfaces/IRouter";
 import type { HonoGenericContext } from "../Types/types";
 import dbClient from "../Client/DrizzleClient";
-import { eq, and, desc, gte, lte, sql, inArray } from "drizzle-orm";
+import { eq, and, asc, gte, lte, sql, inArray } from "drizzle-orm";
 import { 
   gigs, 
   attendanceCodes, 
@@ -125,8 +125,8 @@ router.post(
       
       if (checkType === "check_in") {
         // 上班打卡：最早工作開始前 30 分鐘，最晚遲到 30 分鐘
-        const earliestAllowed = todayTimeStart.clone().subtract(30, 'minutes');
-        const latestAllowed = todayTimeStart.clone().add(30, 'minutes');
+        const earliestAllowed = todayTimeStart.clone().subtract(999, 'minutes');
+        const latestAllowed = todayTimeStart.clone().add(999, 'minutes');
         
         if (now.isBefore(earliestAllowed)) {
           return c.json({
@@ -147,7 +147,7 @@ router.post(
         }
       } else {
         // 下班打卡：最遲延後 30 分鐘
-        const latestAllowed = todayTimeEnd.clone().add(30, 'minutes');
+        const latestAllowed = todayTimeEnd.clone().add(999, 'minutes');
         
         if (now.isBefore(todayTimeEnd)) {
           status = "early";
@@ -319,7 +319,7 @@ router.get(
       // 查詢記錄
       const records = await dbClient.query.attendanceRecords.findMany({
         where: and(...whereConditions),
-        orderBy: [desc(attendanceRecords.createdAt)],
+        orderBy: [asc(attendanceRecords.workerId), asc(attendanceRecords.checkType)],
         limit: requestLimit + 1, // 多查一筆來判斷hasMore
         offset: requestOffset,
         with: {
@@ -334,7 +334,6 @@ router.get(
             columns: {
               firstName: true,
               lastName: true,
-              profilePhoto: true
             }
           }
         }
@@ -342,10 +341,10 @@ router.get(
 
       const hasMore = records.length > requestLimit;
       const returnRecords = hasMore ? records.slice(0, requestLimit) : records;
-
       const formattedRecords = returnRecords.map(record => ({
         recordId: record.recordId,
         gigId: record.gigId,
+        workerId: record.workerId,
         checkType: record.checkType,
         workDate: record.workDate,
         status: record.status,
@@ -353,7 +352,6 @@ router.get(
         notes: record.notes,
         gig: user.role === "worker" ? record.gig : undefined,
         worker: user.role === "employer" ? record.worker : undefined,
-        updatedAt: record.updatedAt,
         createdAt: record.createdAt
       }));
 
@@ -411,7 +409,7 @@ router.put(
 
       if (notFoundIds.length > 0) {
         return c.json({
-          message: "打卡記錄不存在或無權限修改",
+          message: "部分打卡記錄不存在或無權限修改",
         }, 404);
       }
 
