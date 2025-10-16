@@ -54,11 +54,6 @@ async function getGigStatus(gig: {
   if (gig.unlistedAt === null && DateUtils.formatDate(gig.dateStart) > today) {
     return "已刊登,未開始";
   }
-
-  // 7. 未開始并且已下架
-  if (gig.unlistedAt && DateUtils.formatDate(gig.dateStart) > today) {
-    return "未開始,未上架";
-  }
   
   return "未開始";
 }
