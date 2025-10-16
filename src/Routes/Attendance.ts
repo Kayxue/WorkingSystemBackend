@@ -4,7 +4,7 @@ import { requireApprovedEmployer, requireEmployer, requireWorker } from "../Midd
 import type IRouter from "../Interfaces/IRouter";
 import type { HonoGenericContext } from "../Types/types";
 import dbClient from "../Client/DrizzleClient";
-import { eq, and, desc, gte, lte, sql } from "drizzle-orm";
+import { eq, and, desc, gte, lte, sql, inArray } from "drizzle-orm";
 import { 
   gigs, 
   attendanceCodes, 
@@ -401,7 +401,7 @@ router.put(
         .from(attendanceRecords)
         .innerJoin(gigs, eq(attendanceRecords.gigId, gigs.gigId))
         .where(and(
-          sql`${attendanceRecords.recordId} = ANY(${allRecordIds})`,
+          inArray(attendanceRecords.recordId, allRecordIds),
           eq(gigs.employerId, user.employerId)
         ));
 
@@ -449,7 +449,7 @@ router.put(
       await dbClient
         .update(attendanceRecords)
         .set(updateData)
-        .where(sql`${attendanceRecords.recordId} = ANY(${allRecordIds})`)
+        .where(inArray(attendanceRecords.recordId, allRecordIds))
 
       return c.json({
         message: "打卡記錄更新成功",
