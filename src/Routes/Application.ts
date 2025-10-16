@@ -42,9 +42,8 @@ router.post(
         where: and(
           eq(gigs.gigId, gigId),
           eq(gigs.isActive, true),
-          //lte(gigs.publishedAt, currentDate),
           gte(gigs.dateEnd, currentDate),
-          sql`(${gigs.unlistedAt} IS NULL OR ${gigs.unlistedAt} >= ${currentDate})`
+          sql`(${gigs.unlistedAt} IS NULL)`
         )
       });
 

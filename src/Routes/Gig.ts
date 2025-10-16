@@ -36,12 +36,12 @@ async function getGigStatus(gig: {
   }
   
   // 3. 已下架并且正在進行中 (手動下架)
-  if (gig.unlistedAt && gig.unlistedAt !== null && DateUtils.formatDate(gig.dateStart) <= today) {
+  if (gig.unlistedAt && DateUtils.formatDate(gig.dateStart) <= today) {
     return "已下架,正在進行";
   }
 
   // 4. 已下架并且未開始 (手動下架)
-  if (gig.unlistedAt && gig.unlistedAt !== null && DateUtils.formatDate(gig.dateStart) > today) {
+  if (gig.unlistedAt && DateUtils.formatDate(gig.dateStart) > today) {
     return "已下架,未開始";
   }
   
@@ -55,13 +55,8 @@ async function getGigStatus(gig: {
     return "已刊登,未開始";
   }
 
-  // 7. 未開始并且已上架
-  if (gig.unlistedAt === null && DateUtils.formatDate(gig.dateStart) > today) {
-    return "已刊登,未開始";
-  }
-
-  // 8. 未開始并且已下架
-  if (gig.unlistedAt && DateUtils.formatDate(gig.unlistedAt) <= today && DateUtils.formatDate(gig.dateStart) > today) {
+  // 7. 未開始并且已下架
+  if (gig.unlistedAt && DateUtils.formatDate(gig.dateStart) > today) {
     return "未開始,未上架";
   }
   
@@ -327,12 +322,10 @@ router.get("/public/:gigId", async (c) => {
       return c.json({ error: "Gig ID is required" }, 400);
     }
 
-    const today = DateUtils.getCurrentDate();
-
     const whereConditions = [
       eq(gigs.gigId, gigId),
       eq(gigs.isActive, true),
-      sql`(${gigs.unlistedAt} IS NULL OR ${gigs.unlistedAt} >= ${today})`,
+      sql`(${gigs.unlistedAt} IS NULL)`,
     ];
 
     const gig = await dbClient.query.gigs.findFirst({
@@ -436,13 +429,11 @@ router.get("/public/:gigId/conflicts", authenticated, requireWorker, async (c) =
       return c.json({ error: "Gig ID is required" }, 400);
     }
 
-    const today = DateUtils.getCurrentDate();
-
     // 檢查工作是否存在且可用
     const whereConditions = [
       eq(gigs.gigId, gigId),
       eq(gigs.isActive, true),
-      sql`(${gigs.unlistedAt} IS NULL OR ${gigs.unlistedAt} >= ${today})`,
+      sql`(${gigs.unlistedAt} IS NULL)`,
     ];
 
     const gig = await dbClient.query.gigs.findFirst({
@@ -1085,11 +1076,10 @@ router.get("/employer/calendar", authenticated, requireEmployer, requireApproved
       );
     }
 
-    const currentDate = DateUtils.getCurrentDate();
     const whereConditions = [
       eq(gigs.employerId, user.employerId),
       eq(gigs.isActive, true),
-      sql`(${gigs.unlistedAt} IS NULL OR ${gigs.unlistedAt} >= ${currentDate})`,
+      sql`(${gigs.unlistedAt} IS NULL)`,
     ];
 
     // 處理日期查詢邏輯
