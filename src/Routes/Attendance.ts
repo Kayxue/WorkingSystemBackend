@@ -349,6 +349,7 @@ router.get(
         checkType: record.checkType,
         workDate: record.workDate,
         status: record.status,
+        attendanceConfirmation: record.attendanceConfirmation,
         notes: record.notes,
         gig: user.role === "worker" ? record.gig : undefined,
         worker: user.role === "employer" ? record.worker : undefined,
@@ -387,50 +388,72 @@ router.put(
   zValidator("json", updateAttendanceRecordSchema),
   async (c) => {
     const user = c.get("user");
-    const { recordId, status, notes } = c.req.valid("json");
+    const { records } = c.req.valid("json");
 
     try {
-      const record = await dbClient
+      const allRecordIds = records.map(r => r.recordId);
+
+      // 驗證所有記錄是否存在且屬於該雇主
+      const existingRecords = await dbClient
         .select({
           recordId: attendanceRecords.recordId,
-          status: attendanceRecords.status,
-          notes: attendanceRecords.notes,
         })
         .from(attendanceRecords)
         .innerJoin(gigs, eq(attendanceRecords.gigId, gigs.gigId))
         .where(and(
-          eq(attendanceRecords.recordId, recordId),
+          sql`${attendanceRecords.recordId} = ANY(${allRecordIds})`,
           eq(gigs.employerId, user.employerId)
-        ))
-        .limit(1);
+        ));
 
-      if (record.length === 0) {
+      // 檢查是否所有記錄都存在且有權限
+      const foundRecordIds = existingRecords.map(r => r.recordId);
+      const notFoundIds = allRecordIds.filter(id => !foundRecordIds.includes(id));
+
+      if (notFoundIds.length > 0) {
         return c.json({
-          message: "打卡記錄不存在或無權限修改"
+          message: "打卡記錄不存在或無權限修改",
         }, 404);
       }
 
-      const [updatedRecord] = await dbClient
+      const statusCases = records
+        .filter(r => r.status !== undefined)
+        .map(r => sql`WHEN ${attendanceRecords.recordId} = ${r.recordId} THEN ${r.status}`)
+        .filter(Boolean);
+
+      const confirmationCases = records
+        .filter(r => r.attendanceConfirmation !== undefined)
+        .map(r => sql`WHEN ${attendanceRecords.recordId} = ${r.recordId} THEN ${r.attendanceConfirmation}`)
+        .filter(Boolean);
+
+      const notesCases = records
+        .filter(r => r.notes !== undefined)
+        .map(r => sql`WHEN ${attendanceRecords.recordId} = ${r.recordId} THEN ${r.notes}`)
+        .filter(Boolean);
+
+      const updateData: any = {
+        updatedAt: sql`now()`
+      };
+
+      if (statusCases.length > 0) {
+        updateData.status = sql`CASE ${sql.join(statusCases, sql` `)} ELSE ${attendanceRecords.status} END`;
+      }
+
+      if (confirmationCases.length > 0) {
+        updateData.attendanceConfirmation = sql`CASE ${sql.join(confirmationCases, sql` `)} ELSE ${attendanceRecords.attendanceConfirmation} END`;
+      }
+
+      if (notesCases.length > 0) {
+        updateData.notes = sql`CASE ${sql.join(notesCases, sql` `)} ELSE ${attendanceRecords.notes} END`;
+      }
+
+      await dbClient
         .update(attendanceRecords)
-        .set({
-          status,
-          notes,
-          updatedAt: sql`now()`
-        })
-        .where(eq(attendanceRecords.recordId, recordId))
-        .returning();
+        .set(updateData)
+        .where(sql`${attendanceRecords.recordId} = ANY(${allRecordIds})`)
 
       return c.json({
         message: "打卡記錄更新成功",
-        record: {
-          recordId: updatedRecord.recordId,
-          checkType: updatedRecord.checkType,
-          status: updatedRecord.status,
-          notes: updatedRecord.notes,
-          updatedAt: updatedRecord.updatedAt
-        }
       });
-
     } catch (error) {
       console.error("更新打卡記錄時出錯:", error);
       return c.json({

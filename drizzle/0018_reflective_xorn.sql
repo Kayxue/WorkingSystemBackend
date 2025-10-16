@@ -1,0 +1,1 @@
+ALTER TABLE "attendance_records" ADD COLUMN "attendance_confirmation" varchar DEFAULT 'pending' NOT NULL;

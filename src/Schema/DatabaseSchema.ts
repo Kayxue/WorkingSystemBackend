@@ -338,6 +338,11 @@ export const attendanceRecords = pgTable("attendance_records", {
     enum: ["on_time", "late", "early"],
   }).default("on_time"),
   
+  // 確認狀態：pending(待確認), confirmed(已確認), rejected(已拒絕)
+  attendanceConfirmation: varchar("attendance_confirmation", {
+    enum: ["pending", "confirmed", "rejected"],
+  }).default("pending").notNull(),
+  
   // 備註
   notes: text("notes"),
   

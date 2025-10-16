@@ -425,9 +425,20 @@ export const getAttendanceRecordsSchema = z.object({
 
 // 雇主修改打卡記錄
 export const updateAttendanceRecordSchema = z.object({
-  recordId: z.string().min(1, "記錄ID不能為空"),
-  status: z.enum(["on_time", "late", "early"]),
-  notes: z.string().min(1, "備註不能為空").max(500, "備註不能超過500字"),
+  records: z.array(
+    z.object({
+      recordId: z.string().min(1, "記錄ID不能為空"),
+      status: z.enum(["on_time", "late", "early"]).optional(),
+      attendanceConfirmation: z.enum(["pending", "confirmed", "rejected"]).optional(),
+      notes: z.string().max(500, "備註不能超過500字").optional(),
+    }).refine((data) => {
+      return data.status || data.attendanceConfirmation || data.notes;
+    }, {
+      message: "至少需要提供 status、attendanceConfirmation 或 notes 其中一個欄位",
+    })
+  )
+  .min(1, "至少需要一筆記錄")
+  .max(100, "一次最多更新100筆記錄")
 });
 
 /* FCM token schemas */
