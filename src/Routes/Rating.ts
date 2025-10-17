@@ -409,10 +409,9 @@ router.get("/my-ratings/employer", authenticated, requireEmployer, requireApprov
 router.get("/my-ratings/worker", authenticated, requireWorker, async (c) => {
   try {
     const user = c.get("user");
-    const limit = c.req.query("limit") || "10";
-    const offset = c.req.query("offset") || "0";
-    const requestLimit = Number.parseInt(limit);
-    const requestOffset = Number.parseInt(offset);
+    const page = c.req.query("page")
+    const requestLimit = 10;
+    const requestOffset = requestLimit * (Number.parseInt(page) - 1) || 0;
     const workerId = user.workerId;
 
     // 獲取打工者的所有評分
@@ -450,29 +449,27 @@ router.get("/my-ratings/worker", authenticated, requireWorker, async (c) => {
     const returnRatings = hasMore ? myRatings.slice(0, requestLimit) : myRatings;
 
     return c.json({
-      data: {
-        myRatings: returnRatings.map((rating) => ({
-          ratingId: rating.ratingId,
-          employer: {
-            employerId: rating.employer.employerId,
-            name: rating.employer.branchName ? `${rating.employer.employerName} - ${rating.employer.branchName}` : rating.employer.employerName,
-          },
-          gig: {
-            gigId: rating.gig.gigId,
-            title: rating.gig.title,
-            startDate: rating.gig.dateStart,
-            endDate: rating.gig.dateEnd,
-          },
-          ratingValue: rating.ratingValue,
-          comment: rating.comment,
-          createdAt: rating.createdAt,
-        })),
-        pagination: {
-          limit: requestLimit,
-          offset: requestOffset,
-          hasMore,
-          returned: returnRatings.length,
+      myRatings: returnRatings.map((rating) => ({
+        ratingId: rating.ratingId,
+        employer: {
+          employerId: rating.employer.employerId,
+          name: rating.employer.branchName ? `${rating.employer.employerName} - ${rating.employer.branchName}` : rating.employer.employerName,
         },
+        gig: {
+          gigId: rating.gig.gigId,
+          title: rating.gig.title,
+          startDate: rating.gig.dateStart,
+          endDate: rating.gig.dateEnd,
+        },
+        ratingValue: rating.ratingValue,
+        comment: rating.comment,
+        createdAt: rating.createdAt,
+      })),
+      pagination: {
+        limit: requestLimit,
+        page: Number.parseInt(page) || 1,
+        hasMore,
+        returned: returnRatings.length,
       },
     }, 200);
   } catch (error) {
