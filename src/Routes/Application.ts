@@ -8,7 +8,7 @@ import {
 import type IRouter from "../Interfaces/IRouter";
 import type { HonoGenericContext } from "../Types/types";
 import dbClient from "../Client/DrizzleClient";
-import { eq, and, desc, or, lte, sql, gte } from "drizzle-orm";
+import { eq, and, desc, or, lte, sql, gte, inArray } from "drizzle-orm";
 import {
   gigs,
   gigApplications,
@@ -20,6 +20,7 @@ import { reviewApplicationSchema, workerConfirmApplicationSchema } from "../Type
 import { DateUtils } from "../Utils/DateUtils";
 import NotificationHelper from "../Utils/NotificationHelper";
 import { Role } from "../Types/types";
+import { ApplicationConflictChecker } from "../Utils/ApplicationConflictChecker";
 
 const router = new Hono<HonoGenericContext>();
 
@@ -177,8 +178,7 @@ router.get("/my-applications", authenticated, requireWorker, async (c) => {
     const limit = c.req.query("limit") || "10";
     const offset = c.req.query("offset") || "0";
 
-    // 建立查詢條件
-    const whereConditions = [eq(gigApplications.workerId, user.workerId)];
+    // 建立狀態過濾
     const validStatuses = [
       "pending_employer_review",
       "employer_rejected",
@@ -189,57 +189,118 @@ router.get("/my-applications", authenticated, requireWorker, async (c) => {
       "system_cancelled"
     ];
 
+    let statusFilter = "";
+
     if (status && status === "inactive") {
-      // employer_rejected,worker_declined,worker_cancelled,system_cancelled
-      whereConditions.push(or(
-        eq(gigApplications.status, "employer_rejected"),
-        eq(gigApplications.status, "worker_declined"),
-        eq(gigApplications.status, "worker_cancelled"),
-        eq(gigApplications.status, "system_cancelled")
-      ));
+      statusFilter = `AND app.status IN ('employer_rejected', 'worker_declined', 'worker_cancelled', 'system_cancelled')`;
     } else if (status && validStatuses.includes(status)) {
-      whereConditions.push(eq(gigApplications.status, status as any));
+      statusFilter = `AND app.status = '${status}'`;
     }
 
     const requestLimit = Number.parseInt(limit);
     const requestOffset = Number.parseInt(offset);
 
-    // 查詢申請記錄
-    const applications = await dbClient.query.gigApplications.findMany({
-      where: and(...whereConditions),
-      with: {
-        gig: {
-          with: {
-            employer: true,
-          },
-        },
-      },
-      orderBy: [desc(gigApplications.createdAt)],
-      limit: requestLimit + 1, // 多查一筆來判斷 hasMore
-      offset: requestOffset,
-    });
+    const applicationsWithConflicts = await dbClient.execute(sql`
+      WITH current_applications AS (
+        SELECT 
+          app.application_id,
+          app.gig_id,
+          app.status,
+          app.created_at as applied_at,
+          g.title as gig_title,
+          g.hourly_rate,
+          g.date_start,
+          g.date_end,
+          g.time_start,
+          g.time_end
+        FROM gig_applications app
+        INNER JOIN gigs g ON app.gig_id = g.gig_id
+        WHERE app.worker_id = ${user.workerId}
+        ${sql.raw(statusFilter)}
+        ORDER BY app.created_at DESC
+        LIMIT ${requestLimit + 1}
+        OFFSET ${requestOffset}
+      ),
+      confirmed_gigs AS (
+        SELECT 
+          g.gig_id,
+          g.date_start,
+          g.date_end,
+          g.time_start,
+          g.time_end
+        FROM gig_applications app
+        INNER JOIN gigs g ON app.gig_id = g.gig_id
+        WHERE app.worker_id = ${user.workerId}
+          AND app.status = 'worker_confirmed'
+          AND g.is_active = true
+      ),
+      pending_gigs AS (
+        SELECT 
+          app.application_id,
+          g.gig_id,
+          g.date_start,
+          g.date_end,
+          g.time_start,
+          g.time_end
+        FROM gig_applications app
+        INNER JOIN gigs g ON app.gig_id = g.gig_id
+        WHERE app.worker_id = ${user.workerId}
+          AND app.status IN ('pending_employer_review', 'pending_worker_confirmation')
+          AND g.is_active = true
+      )
+      SELECT 
+        ca.*,
+        CASE 
+          WHEN ca.status IN ('pending_employer_review', 'pending_worker_confirmation') THEN
+            EXISTS (
+              SELECT 1 FROM confirmed_gigs cg
+              WHERE cg.gig_id != ca.gig_id
+                AND cg.date_start <= ca.date_end
+                AND cg.date_end >= ca.date_start
+                AND cg.time_start < ca.time_end
+                AND cg.time_end > ca.time_start
+            )
+          ELSE NULL
+        END as has_conflict,
+        CASE 
+          WHEN ca.status IN ('pending_employer_review', 'pending_worker_confirmation') THEN
+            EXISTS (
+              SELECT 1 FROM pending_gigs pg
+              WHERE pg.application_id != ca.application_id
+                AND pg.gig_id != ca.gig_id
+                AND pg.date_start <= ca.date_end
+                AND pg.date_end >= ca.date_start
+                AND pg.time_start < ca.time_end
+                AND pg.time_end > ca.time_start
+            )
+          ELSE NULL
+        END as has_pending_conflict
+      FROM current_applications ca
+    `);
 
+    const results = applicationsWithConflicts;
+    
     // 判斷是否有更多數據
-    const hasMore = applications.length > requestLimit;
-    const actualApplications = hasMore ? applications.slice(0, requestLimit) : applications;
+    const hasMore = results.length > requestLimit;
+    const actualResults = hasMore ? results.slice(0, requestLimit) : results;
 
     return c.json({
-      applications: actualApplications.map(app => ({
-        applicationId: app.applicationId,
-        gigId: app.gigId,
-        gigTitle: app.gig.title,
-        employerName: app.gig.employer.employerName,
-        hourlyRate: app.gig.hourlyRate,
-        workDate: `${app.gig.dateStart} ~ ${app.gig.dateEnd}`,
-        workTime: `${app.gig.timeStart} ~ ${app.gig.timeEnd}`,
-        status: app.status,
-        appliedAt: app.createdAt,
+      applications: actualResults.map((row) => ({
+        applicationId: row.application_id,
+        gigId: row.gig_id,
+        gigTitle: row.gig_title,
+        workDate: `${DateUtils.formatDate(row.date_start)} ~ ${DateUtils.formatDate(row.date_end)}`,
+        workTime: `${row.time_start} ~ ${row.time_end}`,
+        status: row.status,
+        appliedAt: row.applied_at,
+        hasConflict: row.has_conflict,
+        hasPendingConflict: row.has_pending_conflict,
       })),
       pagination: {
         limit: requestLimit,
         offset: requestOffset,
         hasMore: hasMore,
-        returned: actualApplications.length,
+        returned: actualResults.length,
       },
     }, 200);
 
@@ -249,6 +310,114 @@ router.get("/my-applications", authenticated, requireWorker, async (c) => {
       message: "獲取申請記錄失敗",
       error: error instanceof Error ? error.message : "未知錯誤",
     }, 500);
+  }
+});
+
+/**
+ * Worker 查看特定申請的衝突工作
+ * GET /application/:applicationId/conflicts
+ */
+router.get("/:applicationId/conflicts", authenticated, requireWorker, async (c) => {
+  try {
+    const user = c.get("user");
+    const applicationId = c.req.param("applicationId");
+
+    // 查找申請記錄
+    const application = await dbClient.query.gigApplications.findFirst({
+      where: and(
+        eq(gigApplications.applicationId, applicationId),
+        eq(gigApplications.workerId, user.workerId)
+      ),
+      with: {
+        gig: {
+          columns: {
+            gigId: true,
+            title: true,
+            dateStart: true,
+            dateEnd: true,
+            timeStart: true,
+            timeEnd: true,
+            isActive: true,
+          },
+        },
+      },
+    });
+
+    if (!application) {
+      return c.json({ message: "申請記錄不存在" }, 404);
+    }
+
+    // 檢查與已確認工作的衝突
+    const confirmedConflictCheck = await ApplicationConflictChecker.checkWorkerScheduleConflict(
+      user.workerId,
+      application.gigId
+    );
+
+    const conflictingConfirmedGigs = confirmedConflictCheck.hasConflict
+      ? confirmedConflictCheck.conflictingGigs.map(conflict => ({
+          gigId: conflict.gigId,
+          title: conflict.title,
+          dateStart: DateUtils.formatDate(conflict.dateStart),
+          dateEnd: DateUtils.formatDate(conflict.dateEnd),
+          timeStart: conflict.timeStart,
+          timeEnd: conflict.timeEnd,
+        }))
+      : [];
+
+    // 檢查與待處理申請的衝突
+    const conflictingApplicationIds = await ApplicationConflictChecker.getConflictingPendingApplications(
+      user.workerId,
+      application.gigId
+    );
+
+    let conflictingPendingApplications = [];
+
+    if (conflictingApplicationIds.length > 0) {
+      const conflictingApps = await dbClient.query.gigApplications.findMany({
+        where: inArray(gigApplications.applicationId, conflictingApplicationIds),
+        with: {
+          gig: {
+            columns: {
+              gigId: true,
+              title: true,
+              dateStart: true,
+              dateEnd: true,
+              timeStart: true,
+              timeEnd: true,
+            },
+          },
+        },
+      });
+
+      conflictingPendingApplications = conflictingApps.map(app => ({
+        applicationId: app.applicationId,
+        gigId: app.gig.gigId,
+        title: app.gig.title,
+        dateStart: DateUtils.formatDate(app.gig.dateStart),
+        dateEnd: DateUtils.formatDate(app.gig.dateEnd),
+        timeStart: app.gig.timeStart,
+        timeEnd: app.gig.timeEnd,
+        status: app.status,
+      }));
+    }
+
+    return c.json({
+      application: {
+        applicationId: application.applicationId,
+        gigId: application.gig.gigId,
+        title: application.gig.title,
+        dateStart: DateUtils.formatDate(application.gig.dateStart),
+        dateEnd: DateUtils.formatDate(application.gig.dateEnd),
+        timeStart: application.gig.timeStart,
+        timeEnd: application.gig.timeEnd,
+        status: application.status,
+      },
+      confirmedGigs: conflictingConfirmedGigs,
+      pendingApplications: conflictingPendingApplications,
+    }, 200);
+  } catch (error) {
+    console.error(`獲取申請衝突資訊時出錯:`, error);
+    return c.text("伺服器內部錯誤", 500);
   }
 });
 
