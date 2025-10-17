@@ -8,6 +8,7 @@ import { hash } from "@node-rs/argon2";
 import { Glob } from "bun";
 import type IRouter from "./Interfaces/IRouter";
 import redisClient from "./Client/RedisClient";
+import { CronManager } from "./Utils/CronManager";
 
 const app = new Hono<HonoGenericContext>();
 
@@ -85,26 +86,24 @@ async function initializeSystem() {
   try {
     await redisClient.ping();
   } catch (error) {
-    console.error("❌ Redis 快取連接失敗:", error);
+    console.error("Redis 快取連接失敗:", error);
   }
 
-  /*
   // 初始化 Cron 任務
   try {
     const cronInitialized = await CronManager.initializeCronJobs();
 
     if (cronInitialized) {
-      console.log("✅ Cron 任務初始化完成");
+      console.log("Cron 任務初始化完成");
     }
   } catch (error) {
-    console.error("❌ Cron 任務初始化過程中發生錯誤:", error);
+    console.error("Cron 任務初始化過程中發生錯誤:", error);
   }
-  */
 }
 
 // 在應用啟動時初始化系統
 initializeSystem().catch((error) => {
-  console.error("❌ 系統初始化失敗:", error);
+  console.error("系統初始化失敗:", error);
 });
 
 export default app;

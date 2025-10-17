@@ -343,7 +343,7 @@ router.get("/profile", authenticated, async (c) => {
           if (presignedUrl) {
             return { ...doc, presignedUrl };
           } else {
-            console.warn(`❌ 驗證文件 URL 生成失敗: ${doc.r2Name}`);
+            console.warn(`驗證文件 URL 生成失敗: ${doc.r2Name}`);
             return {
               ...doc,
               presignedUrl: null,

@@ -8,7 +8,7 @@ import {
 import type IRouter from "../Interfaces/IRouter";
 import type { HonoGenericContext } from "../Types/types";
 import dbClient from "../Client/DrizzleClient";
-import { eq, and, desc, or, lte, sql, gte, inArray } from "drizzle-orm";
+import { eq, and, desc, or, lte, sql, gte, inArray, ne, lt, gt } from "drizzle-orm";
 import {
   gigs,
   gigApplications,
@@ -20,7 +20,6 @@ import { reviewApplicationSchema, workerConfirmApplicationSchema } from "../Type
 import { DateUtils } from "../Utils/DateUtils";
 import NotificationHelper from "../Utils/NotificationHelper";
 import { Role } from "../Types/types";
-import { ApplicationConflictChecker } from "../Utils/ApplicationConflictChecker";
 
 const router = new Hono<HonoGenericContext>();
 
@@ -315,12 +314,23 @@ router.get("/my-applications", authenticated, requireWorker, async (c) => {
 
 /**
  * Worker 查看特定申請的衝突工作
- * GET /application/:applicationId/conflicts
  */
 router.get("/:applicationId/conflicts", authenticated, requireWorker, async (c) => {
   try {
     const user = c.get("user");
     const applicationId = c.req.param("applicationId");
+    const type = c.req.query("type");
+    const limit = c.req.query("limit") || "10";
+    const offset = c.req.query("offset") || "0";
+
+    if (!type || (type !== "confirmed" && type !== "pending")) {
+      return c.json({
+        error: "必須提供 type 參數，值為 'confirmed' 或 'pending'",
+      }, 400);
+    }
+
+    const requestLimit = Number.parseInt(limit);
+    const requestOffset = Number.parseInt(offset);
 
     // 查找申請記錄
     const application = await dbClient.query.gigApplications.findFirst({
@@ -347,74 +357,129 @@ router.get("/:applicationId/conflicts", authenticated, requireWorker, async (c) 
       return c.json({ message: "申請記錄不存在" }, 404);
     }
 
-    // 檢查與已確認工作的衝突
-    const confirmedConflictCheck = await ApplicationConflictChecker.checkWorkerScheduleConflict(
-      user.workerId,
-      application.gigId
-    );
+    const targetDateStart = DateUtils.formatDate(application.gig.dateStart);
+    const targetDateEnd = DateUtils.formatDate(application.gig.dateEnd);
 
-    const conflictingConfirmedGigs = confirmedConflictCheck.hasConflict
-      ? confirmedConflictCheck.conflictingGigs.map(conflict => ({
-          gigId: conflict.gigId,
-          title: conflict.title,
-          dateStart: DateUtils.formatDate(conflict.dateStart),
-          dateEnd: DateUtils.formatDate(conflict.dateEnd),
-          timeStart: conflict.timeStart,
-          timeEnd: conflict.timeEnd,
-        }))
-      : [];
+    if (type === "confirmed") {
+      // 查詢與已確認工作的衝突
+      const conflictingGigs = await dbClient
+        .select({
+          gigId: gigs.gigId,
+          title: gigs.title,
+          dateStart: gigs.dateStart,
+          dateEnd: gigs.dateEnd,
+          timeStart: gigs.timeStart,
+          timeEnd: gigs.timeEnd,
+        })
+        .from(gigApplications)
+        .innerJoin(gigs, eq(gigApplications.gigId, gigs.gigId))
+        .where(
+          and(
+            eq(gigApplications.workerId, user.workerId),
+            eq(gigApplications.status, "worker_confirmed"),
+            eq(gigs.isActive, true),
+            ne(gigs.gigId, application.gigId),
+            lte(gigs.dateStart, targetDateEnd),
+            gte(gigs.dateEnd, targetDateStart),
+            lt(gigs.timeStart, application.gig.timeEnd),
+            gt(gigs.timeEnd, application.gig.timeStart)
+          )
+        )
+        .limit(requestLimit + 1)
+        .offset(requestOffset);
 
-    // 檢查與待處理申請的衝突
-    const conflictingApplicationIds = await ApplicationConflictChecker.getConflictingPendingApplications(
-      user.workerId,
-      application.gigId
-    );
+      const hasMore = conflictingGigs.length > requestLimit;
+      const actualResults = hasMore ? conflictingGigs.slice(0, requestLimit) : conflictingGigs;
 
-    let conflictingPendingApplications = [];
-
-    if (conflictingApplicationIds.length > 0) {
-      const conflictingApps = await dbClient.query.gigApplications.findMany({
-        where: inArray(gigApplications.applicationId, conflictingApplicationIds),
-        with: {
-          gig: {
-            columns: {
-              gigId: true,
-              title: true,
-              dateStart: true,
-              dateEnd: true,
-              timeStart: true,
-              timeEnd: true,
-            },
-          },
+      return c.json({
+        application: {
+          applicationId: application.applicationId,
+          gigId: application.gig.gigId,
+          title: application.gig.title,
+          dateStart: DateUtils.formatDate(application.gig.dateStart),
+          dateEnd: DateUtils.formatDate(application.gig.dateEnd),
+          timeStart: application.gig.timeStart,
+          timeEnd: application.gig.timeEnd,
+          status: application.status,
         },
-      });
+        confirmedGigConflicts: actualResults.map(gig => ({
+          gigId: gig.gigId,
+          title: gig.title,
+          dateStart: DateUtils.formatDate(gig.dateStart),
+          dateEnd: DateUtils.formatDate(gig.dateEnd),
+          timeStart: gig.timeStart,
+          timeEnd: gig.timeEnd,
+        })),
+        pagination: {
+          limit: requestLimit,
+          offset: requestOffset,
+          hasMore,
+          returned: actualResults.length,
+        },
+      }, 200);
+    } else {
+      // 查詢與待處理申請的衝突
+      const conflictingApps = await dbClient
+        .select({
+          applicationId: gigApplications.applicationId,
+          gigId: gigs.gigId,
+          title: gigs.title,
+          dateStart: gigs.dateStart,
+          dateEnd: gigs.dateEnd,
+          timeStart: gigs.timeStart,
+          timeEnd: gigs.timeEnd,
+          status: gigApplications.status,
+        })
+        .from(gigApplications)
+        .innerJoin(gigs, eq(gigApplications.gigId, gigs.gigId))
+        .where(
+          and(
+            eq(gigApplications.workerId, user.workerId),
+            inArray(gigApplications.status, ["pending_employer_review", "pending_worker_confirmation"]),
+            ne(gigApplications.applicationId, applicationId),
+            ne(gigs.gigId, application.gigId),
+            eq(gigs.isActive, true),
+            lte(gigs.dateStart, targetDateEnd),
+            gte(gigs.dateEnd, targetDateStart),
+            lt(gigs.timeStart, application.gig.timeEnd),
+            gt(gigs.timeEnd, application.gig.timeStart)
+          )
+        )
+        .limit(requestLimit + 1)
+        .offset(requestOffset);
 
-      conflictingPendingApplications = conflictingApps.map(app => ({
-        applicationId: app.applicationId,
-        gigId: app.gig.gigId,
-        title: app.gig.title,
-        dateStart: DateUtils.formatDate(app.gig.dateStart),
-        dateEnd: DateUtils.formatDate(app.gig.dateEnd),
-        timeStart: app.gig.timeStart,
-        timeEnd: app.gig.timeEnd,
-        status: app.status,
-      }));
+      const hasMore = conflictingApps.length > requestLimit;
+      const actualResults = hasMore ? conflictingApps.slice(0, requestLimit) : conflictingApps;
+
+      return c.json({
+        application: {
+          applicationId: application.applicationId,
+          gigId: application.gig.gigId,
+          title: application.gig.title,
+          dateStart: DateUtils.formatDate(application.gig.dateStart),
+          dateEnd: DateUtils.formatDate(application.gig.dateEnd),
+          timeStart: application.gig.timeStart,
+          timeEnd: application.gig.timeEnd,
+          status: application.status,
+        },
+        pendingApplicationConflicts: actualResults.map(app => ({
+          applicationId: app.applicationId,
+          gigId: app.gigId,
+          title: app.title,
+          dateStart: DateUtils.formatDate(app.dateStart),
+          dateEnd: DateUtils.formatDate(app.dateEnd),
+          timeStart: app.timeStart,
+          timeEnd: app.timeEnd,
+          status: app.status,
+        })),
+        pagination: {
+          limit: requestLimit,
+          offset: requestOffset,
+          hasMore,
+          returned: actualResults.length,
+        },
+      }, 200);
     }
-
-    return c.json({
-      application: {
-        applicationId: application.applicationId,
-        gigId: application.gig.gigId,
-        title: application.gig.title,
-        dateStart: DateUtils.formatDate(application.gig.dateStart),
-        dateEnd: DateUtils.formatDate(application.gig.dateEnd),
-        timeStart: application.gig.timeStart,
-        timeEnd: application.gig.timeEnd,
-        status: application.status,
-      },
-      confirmedGigs: conflictingConfirmedGigs,
-      pendingApplications: conflictingPendingApplications,
-    }, 200);
   } catch (error) {
     console.error(`獲取申請衝突資訊時出錯:`, error);
     return c.text("伺服器內部錯誤", 500);

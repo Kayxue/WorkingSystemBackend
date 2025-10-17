@@ -99,7 +99,7 @@ async function handlePhotoUpload(reqFile: any, existingPhotos: any[] = []) {
   const newPhotosInfo = uploadedFiles.map((file: any) => {
     // 驗證檔案物件的完整性
     if (!file || !file.filename || !file.name) {
-      console.error('❌ 檔案物件不完整:', file);
+      console.error('檔案物件不完整:', file);
       throw new Error("檔案資料不完整");
     }
 
@@ -112,11 +112,11 @@ async function handlePhotoUpload(reqFile: any, existingPhotos: any[] = []) {
 
     // 驗證 photoData 不包含 URL
     if (photoData.filename && (photoData.filename.includes('http') || photoData.filename.includes('presigned'))) {
-      console.error('❌ 檢測到嘗試儲存 URL 到環境照片資料庫:', photoData);
+      console.error('檢測到嘗試儲存 URL 到環境照片資料庫:', photoData);
       throw new Error("環境照片資料格式錯誤");
     }
 
-    console.log('✅ 新照片資料:', photoData);
+    console.log('新照片資料:', photoData);
     return photoData;
   });
 
