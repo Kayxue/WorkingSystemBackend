@@ -818,7 +818,7 @@ router.get("/list/worker", authenticated, requireWorker, async (c) => {
       })),
       pagination: {
         limit: requestLimit,
-        offset: requestOffset,
+        page: Number.parseInt(page) || 1,
         hasMore,
         returned: returnGigs.length,
       },
