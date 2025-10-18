@@ -370,6 +370,9 @@ router.get("/:applicationId/conflicts", authenticated, requireWorker, async (c) 
           dateEnd: gigs.dateEnd,
           timeStart: gigs.timeStart,
           timeEnd: gigs.timeEnd,
+          hourlyRate: gigs.hourlyRate,
+          city: gigs.city,
+          district: gigs.district,
         })
         .from(gigApplications)
         .innerJoin(gigs, eq(gigApplications.gigId, gigs.gigId))
@@ -385,6 +388,7 @@ router.get("/:applicationId/conflicts", authenticated, requireWorker, async (c) 
             gt(gigs.timeEnd, application.gig.timeStart)
           )
         )
+        .orderBy(desc(gigs.hourlyRate))
         .limit(requestLimit + 1)
         .offset(requestOffset);
 
@@ -409,6 +413,9 @@ router.get("/:applicationId/conflicts", authenticated, requireWorker, async (c) 
           dateEnd: DateUtils.formatDate(gig.dateEnd),
           timeStart: gig.timeStart,
           timeEnd: gig.timeEnd,
+          hourlyRate: gig.hourlyRate,
+          city: gig.city,
+          district: gig.district,
         })),
         pagination: {
           limit: requestLimit,
@@ -428,6 +435,9 @@ router.get("/:applicationId/conflicts", authenticated, requireWorker, async (c) 
           dateEnd: gigs.dateEnd,
           timeStart: gigs.timeStart,
           timeEnd: gigs.timeEnd,
+          hourlyRate: gigs.hourlyRate,
+          city: gigs.city,
+          district: gigs.district,
           status: gigApplications.status,
         })
         .from(gigApplications)
@@ -445,6 +455,7 @@ router.get("/:applicationId/conflicts", authenticated, requireWorker, async (c) 
             gt(gigs.timeEnd, application.gig.timeStart)
           )
         )
+        .orderBy(desc(gigs.hourlyRate))
         .limit(requestLimit + 1)
         .offset(requestOffset);
 
@@ -470,6 +481,9 @@ router.get("/:applicationId/conflicts", authenticated, requireWorker, async (c) 
           dateEnd: DateUtils.formatDate(app.dateEnd),
           timeStart: app.timeStart,
           timeEnd: app.timeEnd,
+          hourlyRate: app.hourlyRate,
+          city: app.city,
+          district: app.district,
           status: app.status,
         })),
         pagination: {
