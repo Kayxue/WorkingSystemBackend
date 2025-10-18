@@ -282,7 +282,7 @@ router.get("/profile", authenticated, async (c) => {
       }
     }
 
-    const ratingStats = await RatingCache.getRatingStats(user.workerId, Role.WORKER);
+    let ratingStats = await RatingCache.getRatingStats(user.workerId, Role.WORKER);
 
     if (!ratingStats) {
       const dbRatingStats = await dbClient
@@ -293,7 +293,7 @@ router.get("/profile", authenticated, async (c) => {
         .from(workerRatings)
         .where(eq(workerRatings.workerId, user.workerId));
 
-      const ratingStats = {
+      ratingStats = {
         totalRatings: dbRatingStats[0]?.totalRatings || 0,
         averageRating: dbRatingStats[0]?.averageRating ? Number(dbRatingStats[0].averageRating) : 0,
       };
@@ -356,7 +356,7 @@ router.get("/profile", authenticated, async (c) => {
       console.log(`Employer ${user.userId} 沒有驗證文件或格式不正確`);
     }
 
-    const ratingStats = await RatingCache.getRatingStats(user.employerId, Role.EMPLOYER);
+    let ratingStats = await RatingCache.getRatingStats(user.employerId, Role.EMPLOYER);
 
     if (!ratingStats) {
       const dbRatingStats = await dbClient
@@ -367,7 +367,7 @@ router.get("/profile", authenticated, async (c) => {
         .from(employerRatings)
         .where(eq(employerRatings.employerId, user.employerId));
 
-      const ratingStats = {
+      ratingStats = {
         totalRatings: dbRatingStats[0]?.totalRatings || 0,
         averageRating: dbRatingStats[0]?.averageRating ? Number(dbRatingStats[0].averageRating) : 0,
       };
