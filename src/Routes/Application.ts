@@ -288,6 +288,8 @@ router.get("/my-applications", authenticated, requireWorker, async (c) => {
         applicationId: row.application_id,
         gigId: row.gig_id,
         gigTitle: row.gig_title,
+        employerName: row.employer_name,
+        hourlyRate: row.hourly_rate,
         workDate: `${DateUtils.formatDate(row.date_start)} ~ ${DateUtils.formatDate(row.date_end)}`,
         workTime: `${row.time_start} ~ ${row.time_end}`,
         status: row.status,
@@ -373,6 +375,7 @@ router.get("/:applicationId/conflicts", authenticated, requireWorker, async (c) 
           hourlyRate: gigs.hourlyRate,
           city: gigs.city,
           district: gigs.district,
+          address: gigs.address,
         })
         .from(gigApplications)
         .innerJoin(gigs, eq(gigApplications.gigId, gigs.gigId))
