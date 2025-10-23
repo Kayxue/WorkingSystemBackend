@@ -176,6 +176,7 @@ router.get("/my-applications", authenticated, requireWorker, async (c) => {
     const status = c.req.query("status");
     const limit = c.req.query("limit") || "10";
     const offset = c.req.query("offset") || "0";
+    const search = c.req.query("search") || "";
 
     // 建立狀態過濾
     const validStatuses = [
@@ -208,14 +209,17 @@ router.get("/my-applications", authenticated, requireWorker, async (c) => {
           app.created_at as applied_at,
           g.title as gig_title,
           g.hourly_rate,
+          e.employer_name,
           g.date_start,
           g.date_end,
           g.time_start,
           g.time_end
         FROM gig_applications app
         INNER JOIN gigs g ON app.gig_id = g.gig_id
+        INNER JOIN employers e ON g.employer_id = e.employer_id
         WHERE app.worker_id = ${user.workerId}
         ${sql.raw(statusFilter)}
+        ${search ? sql`AND (g.title &@~ ${search} OR g.description &@~ ${search})` : sql``}
         ORDER BY app.created_at DESC
         LIMIT ${requestLimit + 1}
         OFFSET ${requestOffset}
@@ -289,6 +293,7 @@ router.get("/my-applications", authenticated, requireWorker, async (c) => {
         gigId: row.gig_id,
         gigTitle: row.gig_title,
         hourlyRate: row.hourly_rate,
+        employerName: row.employer_name,
         workDate: `${DateUtils.formatDate(row.date_start)} ~ ${DateUtils.formatDate(row.date_end)}`,
         workTime: `${row.time_start} ~ ${row.time_end}`,
         status: row.status,
@@ -371,6 +376,7 @@ router.get("/:applicationId/conflicts", authenticated, requireWorker, async (c) 
           dateEnd: gigs.dateEnd,
           timeStart: gigs.timeStart,
           timeEnd: gigs.timeEnd,
+          employers: employers.employerName,
           hourlyRate: gigs.hourlyRate,
           city: gigs.city,
           district: gigs.district,
@@ -378,6 +384,7 @@ router.get("/:applicationId/conflicts", authenticated, requireWorker, async (c) 
         })
         .from(gigApplications)
         .innerJoin(gigs, eq(gigApplications.gigId, gigs.gigId))
+        .innerJoin(employers, eq(gigs.employerId, employers.employerId))
         .where(
           and(
             eq(gigApplications.workerId, user.workerId),
@@ -416,6 +423,7 @@ router.get("/:applicationId/conflicts", authenticated, requireWorker, async (c) 
           timeStart: gig.timeStart,
           timeEnd: gig.timeEnd,
           hourlyRate: gig.hourlyRate,
+          employerName: gig.employers,
           city: gig.city,
           district: gig.district,
           address: gig.address,
@@ -439,6 +447,7 @@ router.get("/:applicationId/conflicts", authenticated, requireWorker, async (c) 
           timeStart: gigs.timeStart,
           timeEnd: gigs.timeEnd,
           hourlyRate: gigs.hourlyRate,
+          employerName: employers.employerName,
           city: gigs.city,
           district: gigs.district,
           status: gigApplications.status,
@@ -446,6 +455,7 @@ router.get("/:applicationId/conflicts", authenticated, requireWorker, async (c) 
         })
         .from(gigApplications)
         .innerJoin(gigs, eq(gigApplications.gigId, gigs.gigId))
+        .innerJoin(employers, eq(gigs.employerId, employers.employerId))
         .where(
           and(
             eq(gigApplications.workerId, user.workerId),
@@ -486,6 +496,7 @@ router.get("/:applicationId/conflicts", authenticated, requireWorker, async (c) 
           timeStart: app.timeStart,
           timeEnd: app.timeEnd,
           hourlyRate: app.hourlyRate,
+          employerName: app.employerName,
           city: app.city,
           district: app.district,
           status: app.status,
