@@ -387,7 +387,6 @@ router.get("/public/:gigId", async (c) => {
         userId,
         gigId
       );
-
       hasConflict = conflictCheck.hasConflict;
 
       // 檢查申請的衝突
@@ -725,7 +724,7 @@ router.get("/:gigId", authenticated, requireEmployer, async (c) => {
 
     let attendanceCodeInfo: any = undefined;
 
-    if (gigStatus === "已刊登") {
+    if (gigStatus === "已刊登,正在進行") {
       const today = DateUtils.getCurrentDate();
       const existingCode = await dbClient.query.attendanceCodes.findFirst({
         where: and(

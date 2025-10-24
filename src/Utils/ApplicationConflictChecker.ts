@@ -1,6 +1,6 @@
 import dbClient from "../Client/DrizzleClient";
 import { gigApplications, gigs } from "../Schema/DatabaseSchema";
-import { eq, and, lte, gte, lt, gt, ne, inArray } from "drizzle-orm";
+import { sql, eq, and, lte, gte, lt, gt, ne, inArray } from "drizzle-orm";
 import { DateUtils } from "./DateUtils";
 
 export class ApplicationConflictChecker {
@@ -42,6 +42,8 @@ export class ApplicationConflictChecker {
 
       const targetDateStart = DateUtils.formatDate(targetGig.dateStart);
       const targetDateEnd = DateUtils.formatDate(targetGig.dateEnd);
+      const timeStart = sql`${targetGig.timeStart}::time without time zone`;
+      const timeEnd = sql`${targetGig.timeEnd}::time without time zone`;
       const result = await dbClient
         .select({
           gigId: gigs.gigId,
@@ -61,11 +63,11 @@ export class ApplicationConflictChecker {
             ne(gigs.gigId, gigId),
             lte(gigs.dateStart, targetDateEnd),
             gte(gigs.dateEnd, targetDateStart),
-            lt(gigs.timeStart, targetGig.timeEnd),
-            gt(gigs.timeEnd, targetGig.timeStart)
+            lt(sql`${gigs.timeStart}::time without time zone`, timeEnd),
+            gt(sql`${gigs.timeEnd}::time without time zone`, timeStart),
           )
         );
-
+      
       const conflictingGigs = result;
 
       return {
