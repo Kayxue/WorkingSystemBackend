@@ -378,9 +378,7 @@ router.get("/public/:gigId", async (c) => {
           createdAt: true,
         },
       });
-
-      if (application) {
-        //pick the latest application based on createdAt
+      if (application.length !== 0) {
         const latestApplication = application.reduce((latest, current) => {
           return latest.createdAt > current.createdAt ? latest : current;
         });
