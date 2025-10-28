@@ -368,18 +368,24 @@ router.get("/public/:gigId", async (c) => {
 
     if (userId && role === Role.WORKER) {
       // 查找該打工者對此工作的申請狀態
-      const application = await dbClient.query.gigApplications.findFirst({
+      const application = await dbClient.query.gigApplications.findMany({
         where: and(
           eq(gigApplications.workerId, userId),
           eq(gigApplications.gigId, gigId)
         ),
         columns: {
           status: true,
+          createdAt: true,
         },
       });
 
       if (application) {
-        applicationStatus = application.status;
+        //pick the latest application based on createdAt
+        const latestApplication = application.reduce((latest, current) => {
+          return latest.createdAt > current.createdAt ? latest : current;
+        });
+
+        applicationStatus = latestApplication.status;
       }
 
       // 檢查是否有時間衝突（已確認的工作）
