@@ -1,5 +1,4 @@
 import { Hono } from "hono";
-import { cors } from "hono/cors";
 import { sessionMiddleware } from "hono-sessions";
 import { RedisStoreAdapter } from "./Client/RedisSessionStore";
 import type { HonoGenericContext } from "./Types/types";
@@ -9,8 +8,10 @@ import { Glob } from "bun";
 import type IRouter from "./Interfaces/IRouter";
 import redisClient from "./Client/RedisClient";
 import { CronManager } from "./Utils/CronManager";
+import { createBunWebSocket } from 'hono/bun';
 
 const app = new Hono<HonoGenericContext>();
+const { websocket } = createBunWebSocket();
 
 app.use("*", async (c, next) => {
   const start = Date.now();
@@ -48,8 +49,6 @@ const store = new RedisStoreAdapter({
   ttl: 60 * 60 * 24, // 24 小時
   client: redisClient,
 });
-
-app.use("*", cors({ origin: "*", credentials: true }));
 
 app.use(
   "*",
@@ -106,4 +105,7 @@ initializeSystem().catch((error) => {
   console.error("系統初始化失敗:", error);
 });
 
-export default app;
+export default {
+  fetch: app.fetch,
+  websocket,
+}
