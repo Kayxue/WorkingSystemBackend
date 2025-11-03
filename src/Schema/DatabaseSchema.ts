@@ -8,9 +8,12 @@ import {
   json,
   date,
   index,
+  unique,
+  check,
 } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import { length, uuid } from "zod";
 
 // ========== 1. 打工者表（Workers） ==========
 export const workers = pgTable("workers", {
@@ -378,6 +381,83 @@ export const notifications = pgTable("notifications", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// ========== 10. 對話表（Conversations Table） ==========
+export const conversations = pgTable("conversations", {
+  conversationId: varchar("conversation_id", { length: 21 })
+    .$defaultFn(() => nanoid())
+    .primaryKey(),
+  
+  workerId: varchar("worker_id", { length: 21 })
+    .notNull()
+    .references(() => workers.workerId, { onDelete: "cascade" }),
+
+  employerId: varchar("employer_id", { length: 21 })
+    .notNull()
+    .references(() => employers.employerId, { onDelete: "cascade" }),
+
+  lastMessageAt: timestamp('last_message_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+
+  // 記錄 worker 何時刪除了這個對話
+  deletedByWorkerAt: timestamp('deleted_by_worker_at', { withTimezone: true }),
+
+  // 記錄 employer 何時刪除了這個對話
+  deletedByEmployerAt: timestamp('deleted_by_employer_at', { withTimezone: true }),
+},(table) => [
+  index('conversations_worker_idx').on(table.workerId),
+  index('conversations_employer_idx').on(table.employerId),
+  unique('unique_conversation').on(
+    table.workerId,
+    table.employerId
+  ),
+]);
+
+// ========== 10. 訊息（Messages Table） ==========
+export const messages = pgTable("messages", {
+  messagesId: varchar("messages_id", { length: 21 })
+    .$defaultFn(() => nanoid())
+    .primaryKey(),
+  
+  conversationId: varchar("conversation_id", { length: 21 })
+    .notNull()
+    .references(() => conversations.conversationId, { onDelete: "cascade" }),
+  
+  // 發送者 (如果是 worker) 若不是則為 NULL
+  senderWorkerId: varchar('sender_worker_id', { length:21 }).references(() => workers.workerId, {
+    onDelete: 'set null', // 即使 worker 帳號刪除，也保留訊息
+  }),
+
+  // 發送者 (如果是 employer) 若不是則為 NULL
+  senderEmployerId: varchar('sender_employer_id', { length:21 }).references(() => employers.employerId, {
+    onDelete: 'set null',
+  }),
+
+  content: text('content').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+
+  // 刪除標記
+  deletedByWorker: boolean('deleted_by_worker').notNull().default(false),
+  deletedByEmployer: boolean('deleted_by_employer').notNull().default(false),
+
+  // 撤回時間
+  retractedAt: timestamp('retracted_at', { withTimezone: true }),
+  },(table) => [
+    index('messages_conversation_ts_idx').on(
+      table.conversationId,
+      table.createdAt
+    ),
+    check(
+      'check_sender',
+      // 確保 senderWorkerId 和 senderEmployerId 中只有一個不是 NULL
+      sql`num_nonnulls(${table.senderWorkerId}, ${table.senderEmployerId}) = 1`
+    ),
+  ]
+);
+
 // ==============================================
 //               關聯定義 (Relations)
 // ==============================================
@@ -388,6 +468,10 @@ export const workersRelations = relations(workers, ({ many }) => ({
   workerRatings: many(workerRatings),
   employerRatings: many(employerRatings),
   attendanceRecords: many(attendanceRecords),
+  conversations: many(conversations),
+  sentMessages: many(messages, {
+    relationName: 'sentByWorker',
+  }),
 }));
 
 // Employers
@@ -395,6 +479,10 @@ export const employersRelations = relations(employers, ({ many }) => ({
   gigs: many(gigs),
   workerRatings: many(workerRatings),
   employerRatings: many(employerRatings),
+  conversations: many(conversations),
+  sentMessages: many(messages, {
+    relationName: 'sentByEmployer',
+  }),
 }));
 
 // Gigs
@@ -483,5 +571,34 @@ export const attendanceRecordsRelations = relations(attendanceRecords, ({ one })
   attendanceCode: one(attendanceCodes, {
     fields: [attendanceRecords.attendanceCodeId],
     references: [attendanceCodes.codeId],
+  }),
+}));
+
+export const conversationsRelations = relations(conversations, ({ one, many }) => ({
+  worker: one(workers, {
+    fields: [conversations.workerId],
+    references: [workers.workerId],
+  }),
+  employer: one(employers, {
+    fields: [conversations.employerId],
+    references: [employers.employerId],
+  }),
+  messages: many(messages),
+}));
+
+export const messagesRelations = relations(messages, ({ one }) => ({
+  conversation: one(conversations, {
+    fields: [messages.conversationId],
+    references: [conversations.conversationId],
+  }),
+  workerSender: one(workers, {
+    fields: [messages.senderWorkerId],
+    references: [workers.workerId],
+    relationName: 'sentByWorker',
+  }),
+  employerSender: one(employers, {
+    fields: [messages.senderEmployerId],
+    references: [employers.employerId],
+    relationName: 'sentByEmployer',
   }),
 }));
