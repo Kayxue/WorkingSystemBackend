@@ -265,6 +265,60 @@ router.get("/worker/:workerId", authenticated, requireEmployer, requireApprovedE
 });
 
 /**
+ * 商家查看打工者的評分詳情
+ * GET /rating/worker/:workerId
+ */
+router.get("/detail/worker/:workerId", authenticated, requireEmployer, async (c) => {
+  try {
+    const limit = c.req.query("limit") || "10";
+    const offset = c.req.query("offset") || "0";
+    const requestLimit = Number.parseInt(limit);
+    const requestOffset = Number.parseInt(offset);
+    const workerId = c.req.param("workerId");
+
+    // 獲取打工者收到的所有評分
+    const receivedRatings = await dbClient.query.workerRatings.findMany({
+      where: eq(workerRatings.workerId, workerId),
+      columns: {  
+        ratingId: true,
+        ratingValue: true,
+        comment: true,
+        createdAt: true,
+      },
+
+      orderBy: [desc(workerRatings.createdAt)],
+      limit: requestLimit + 1, // 多查一筆來確認是否有更多資料
+      offset: requestOffset,
+    });
+
+    const hasMore = receivedRatings.length > requestLimit;
+    const returnRatings = hasMore ? receivedRatings.slice(0, requestLimit) : receivedRatings;
+
+    return c.json({
+      data: {
+        receivedRatings: returnRatings.map((rating) => ({
+          ratingId: rating.ratingId,
+          ratingValue: rating.ratingValue,
+          comment: rating.comment,
+          createdAt: rating.createdAt,
+        })),
+        pagination: {
+          limit: requestLimit,
+          offset: requestOffset,
+          hasMore,
+          returned: returnRatings.length,
+        },
+      },
+    }, 200);
+  } catch (error) {
+    console.error("獲取打工者收到的評分記錄時發生錯誤:", error);
+    return c.json({
+      message: "獲取評分記錄失敗，請稍後再試",
+    }, 500);
+  }
+});
+
+/**
  * 打工者查看商家的評分統計
  * GET /rating/employer/:employerId
  */
@@ -315,6 +369,59 @@ router.get("/employer/:employerId", authenticated, requireWorker, async (c) => {
     console.error("獲取商家評分時發生錯誤:", error);
     return c.json({
       message: "獲取評分失敗，請稍後再試",
+    }, 500);
+  }
+});
+
+/**
+ * 打工者查看商家的評分詳情
+ * GET /rating/detail/employer/:employerId
+ */
+router.get("/detail/employer/:employerId", authenticated, requireWorker, async (c) => {
+  try {
+    const employerId = c.req.param("employerId");
+    const limit = c.req.query("limit") || "10";
+    const offset = c.req.query("offset") || "0";
+    const requestLimit = Number.parseInt(limit);
+    const requestOffset = Number.parseInt(offset);
+
+    // 獲取商家收到的所有評分
+    const receivedRatings = await dbClient.query.employerRatings.findMany({
+      where: eq(employerRatings.employerId, employerId),
+      columns: {
+        ratingId: true,
+        ratingValue: true,
+        comment: true,
+        createdAt: true,
+      },
+      orderBy: [desc(employerRatings.createdAt)],
+      limit: requestLimit + 1, // 多查一筆來確認是否有更多資料
+      offset: requestOffset,
+    });
+
+    const hasMore = receivedRatings.length > requestLimit;
+    const returnRatings = hasMore ? receivedRatings.slice(0, requestLimit) : receivedRatings;
+
+    return c.json({
+      data: {
+        receivedRatings: returnRatings.map((rating) => ({
+          ratingId: rating.ratingId,
+          ratingValue: rating.ratingValue,
+          comment: rating.comment,
+          createdAt: rating.createdAt,
+        })),
+        pagination: {
+          limit: requestLimit,
+          offset: requestOffset,
+          hasMore,
+          returned: returnRatings.length,
+        },
+      },
+    }, 200);
+  } catch (error) {
+    console.error("獲取商家收到的評分記錄時發生錯誤:", error);
+    return c.json({
+      message: "獲取評分記錄失敗，請稍後再試",
     }, 500);
   }
 });
