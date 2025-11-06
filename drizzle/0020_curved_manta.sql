@@ -1,0 +1,2 @@
+ALTER TABLE "conversations" ADD COLUMN "last_read_at_by_worker" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "conversations" ADD COLUMN "last_read_at_by_employer" timestamp with time zone;

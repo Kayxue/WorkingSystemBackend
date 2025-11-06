@@ -405,6 +405,11 @@ export const conversations = pgTable("conversations", {
 
   // 記錄 employer 何時刪除了這個對話
   deletedByEmployerAt: timestamp('deleted_by_employer_at', { withTimezone: true }),
+
+  // 記錄 worker 最後讀取這個對話的時間
+  lastReadAtByWorker: timestamp('last_read_at_by_worker', { withTimezone: true }),
+  // 記錄 employer 最後讀取這個對話的時間
+  lastReadAtByEmployer: timestamp('last_read_at_by_employer', { withTimezone: true }),
 },(table) => [
   index('conversations_worker_idx').on(table.workerId),
   index('conversations_employer_idx').on(table.employerId),

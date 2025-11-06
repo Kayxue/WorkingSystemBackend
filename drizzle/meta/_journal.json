@@ -141,6 +141,13 @@
       "when": 1762190188685,
       "tag": "0019_fluffy_hedge_knight",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1762451845704,
+      "tag": "0020_curved_manta",
+      "breakpoints": true
     }
   ]
 }
