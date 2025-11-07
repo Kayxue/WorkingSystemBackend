@@ -417,6 +417,90 @@ router.get("/public/:gigId", async (c) => {
   }
 });
 
+// Worker 獲取已確認工作的詳情
+router.get("/worker/:gigId", authenticated, requireWorker, async (c) => {
+  try {
+    const user = c.get("user");
+    const gigId = c.req.param("gigId");
+
+    if (!gigId) {
+      return c.json({ error: "Gig ID is required" }, 400);
+    }
+
+    // 檢查 worker 是否已確認此工作
+    const application = await dbClient.query.gigApplications.findFirst({
+      where: and(
+        eq(gigApplications.workerId, user.workerId),
+        eq(gigApplications.gigId, gigId),
+        eq(gigApplications.status, "worker_confirmed")
+      ),
+      columns: {
+        applicationId: true,
+        status: true,
+        createdAt: true,
+      },
+    });
+
+    if (!application) {
+      return c.json({ message: "工作狀態不符合，無法查看" }, 403);
+    }
+
+    const gig = await dbClient.query.gigs.findFirst({
+      where: eq(gigs.gigId, gigId),
+      columns: {
+        createdAt: false,
+      },
+      with: {
+        employer: {
+          columns: {
+            employerId: true,
+            employerName: true,
+            branchName: true,
+            industryType: true,
+            address: true,
+            employerPhoto: true,
+          },
+        },
+      },
+    });
+
+    if (!gig) {
+      return c.json({ message: "工作不存在" }, 404);
+    }
+
+    if (gig.employer.employerPhoto && typeof gig.employer.employerPhoto === 'object' && 'r2Name' in gig.employer.employerPhoto) {
+      const photo = gig.employer.employerPhoto as any;
+      const url = await FileManager.getPresignedUrl(`profile-photos/employers/${photo.r2Name}`);
+      if (url) {
+        gig.employer.employerPhoto = {
+          url: url,
+          originalName: "********",
+          type: photo.type,
+        };
+      }
+    }
+
+    const gigStatus = await getGigStatus({
+      unlistedAt: gig.unlistedAt,
+      isActive: gig.isActive,
+      dateStart: gig.dateStart,
+      dateEnd: gig.dateEnd,
+    });
+
+    const formattedGig = {
+      ...gig,
+      environmentPhotos: await formatEnvironmentPhotos(gig.environmentPhotos),
+      applicationStatus: application.status,
+      gigStatus,
+    };
+
+    return c.json(formattedGig, 200);
+  } catch (error) {
+    console.error(`獲取已確認工作詳情時出錯:`, error);
+    return c.text("伺服器內部錯誤", 500);
+  }
+});
+
 // Worker 獲取衝突的工作
 router.get("/public/:gigId/conflicts", authenticated, requireWorker, async (c) => {
   try {

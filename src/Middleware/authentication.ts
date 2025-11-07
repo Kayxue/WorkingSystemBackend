@@ -53,6 +53,22 @@ export const authenticate = createMiddleware<HonoGenericContext>(async (c, next)
         if (!employer) {
             return c.text("找不到用戶", 401);
         }
+
+        // 檢查帳號是否被鎖定
+        if (employer.lockedUntil) {
+            const now = new Date();
+            const lockedUntil = new Date(employer.lockedUntil);
+
+            if (now < lockedUntil) {
+                return c.text(`帳號已被封鎖`, 403);
+            }
+
+            await dbClient
+                .update(employers)
+                .set({ lockedUntil: null })
+                .where(eq(employers.employerId, employer.employerId));
+        }
+
         const passwordCorrect = await verify(
             employer.password,
             password,
@@ -119,6 +135,22 @@ export const authenticate = createMiddleware<HonoGenericContext>(async (c, next)
         if (!worker) {
             return c.text("找不到用戶", 401);
         }
+
+        // 檢查帳號是否被鎖定
+        if (worker.lockedUntil) {
+            const now = new Date();
+            const lockedUntil = new Date(worker.lockedUntil);
+            if (now >= lockedUntil) {
+                await dbClient
+                    .update(workers)
+                    .set({ 
+                        lockedUntil: null,
+                        absenceCount: 0
+                    })
+                    .where(eq(workers.workerId, worker.workerId));
+            }
+        }
+
         const passwordCorrect = await verify(
             worker.password,
             password,
@@ -171,6 +203,44 @@ export const authenticated = createMiddleware<HonoGenericContext>(async (c, next
     }
     
     c.set("user", user);
+
+    // 檢查 Worker 帳號鎖定狀態
+    if (user.role === Role.WORKER && user.lockedUntil) {
+        const now = new Date();
+        const lockedUntil = new Date(user.lockedUntil);
+        
+        if (now < lockedUntil) {
+            const path = c.req.path;
+            const allowedPaths = [
+                '/user/profile',
+                '/user/logout',
+                '/user/update/profilePhoto',
+                '/application/worker/calendar',
+                '/attendance/check',
+                '/attendance/gig',
+                '/attendance/records',
+                '/attendance/today-jobs',
+                '/gig/worker/',
+            ];
+            
+            const isAllowed = allowedPaths.some(allowedPath => path.includes(allowedPath));
+            
+            if (!isAllowed) {
+                return c.text(`帳號已被封鎖，不能使用其他功能`, 403);
+            }
+        }
+        else if (now >= lockedUntil)
+        {
+            await dbClient
+                .update(workers)
+                .set({ 
+                    lockedUntil: null,
+                    absenceCount: 0
+                })
+                .where(eq(workers.workerId, user.userId));
+        }
+    }
+    
     return next();
 })
 

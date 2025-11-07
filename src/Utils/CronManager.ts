@@ -63,7 +63,6 @@ export class CronManager {
     const jobName = "auto_cancel_timeout_applications";
 
     try {
-      // 檢查任務是否已存在
       const exists = await CronManager.checkCronJobExists(jobName);
       if (exists) {
         return true;
@@ -92,6 +91,119 @@ export class CronManager {
       `);
 
       console.log(`已創建自動取消超時申請的 cron 任務: ${jobName}`);
+      return true;
+    } catch (error) {
+      console.error(`創建 cron 任務 ${jobName} 失敗:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * 創建每天檢查 Worker 缺席的 cron 任務
+   * 檢查昨天已確認的工作但未打卡的 worker
+   * 缺席 3 次封鎖 30 天，之後每次加 30 天，最多 90 天
+   */
+  static async createCheckWorkerAbsenceJob(): Promise<boolean> {
+    const jobName = "check_worker_absence";
+
+    try {
+      const exists = await CronManager.checkCronJobExists(jobName);
+      if (exists) {
+        return true;
+      }
+
+      // Cron 表達式: 每天 17:00 UTC (等於台北時間深夜 01:00)
+      const schedule = "0 17 * * *";
+
+      // SQL 命令：檢查昨天缺席的 worker 並自動封鎖
+      const command = `
+        DO $$
+        DECLARE
+          yesterday DATE := (CURRENT_DATE AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Taipei' - INTERVAL '1 day')::date;
+          absence_record RECORD;
+          total_absence_count INTEGER := 0;
+          locked_count INTEGER := 0;
+          new_absence_count INTEGER;
+          lock_duration INTERVAL;
+          new_locked_until TIMESTAMP;
+          max_lock_duration INTERVAL := INTERVAL '90 days';
+        BEGIN
+          -- 查找昨天缺席的 worker（已確認工作但未打卡）
+          FOR absence_record IN
+            SELECT DISTINCT 
+              ga.worker_id,
+              ga.gig_id,
+              g.title as gig_title,
+              w.first_name,
+              w.last_name,
+              w.email,
+              w.absence_count as current_absence_count
+            FROM gig_applications ga
+            INNER JOIN gigs g ON ga.gig_id = g.gig_id
+            INNER JOIN workers w ON ga.worker_id = w.worker_id
+            WHERE 
+              ga.status = 'worker_confirmed'
+              AND g.date_start <= yesterday
+              AND g.date_end >= yesterday
+              -- 沒有上班打卡記錄
+              AND NOT EXISTS (
+                SELECT 1 
+                FROM attendance_records ar
+                WHERE ar.worker_id = ga.worker_id
+                  AND ar.gig_id = ga.gig_id
+                  AND ar.work_date = yesterday
+                  AND ar.check_type = 'check_in'
+              )
+          LOOP
+            total_absence_count := total_absence_count + 1;
+            
+            -- 累積缺席次數
+            new_absence_count := absence_record.current_absence_count + 1;
+            
+            -- 更新缺席次數
+            UPDATE workers 
+            SET absence_count = new_absence_count,
+                updated_at = NOW()
+            WHERE worker_id = absence_record.worker_id;
+            
+            -- 封鎖規則：3 次 30 天，之後每次加 30 天，最多 90 天
+            IF new_absence_count >= 3 THEN
+              -- 計算封鎖時長
+              IF new_absence_count = 3 THEN
+                lock_duration := INTERVAL '30 days';
+              ELSE
+                -- 每多一次缺席加 30 天：(absence_count - 2) * 30
+                lock_duration := INTERVAL '30 days' * (new_absence_count - 2);
+                
+                -- 限制最大封鎖時長為 90 天
+                IF lock_duration > max_lock_duration THEN
+                  lock_duration := max_lock_duration;
+                END IF;
+              END IF;
+              
+              new_locked_until := NOW() + lock_duration;
+              
+              -- 封鎖帳號
+              UPDATE workers 
+              SET locked_until = new_locked_until,
+                  updated_at = NOW()
+              WHERE worker_id = absence_record.worker_id;
+              
+              locked_count := locked_count + 1;
+            END IF;
+          END LOOP;
+        END $$;
+      `;
+
+      await CronManager.dbClient.execute(sql`
+        SELECT cron.schedule(
+          ${jobName},
+          ${schedule},
+          ${command}
+        );
+      `);
+
+      console.log(`已創建檢查 Worker 缺席的 cron 任務: ${jobName}`);
       return true;
     } catch (error) {
       console.error(`創建 cron 任務 ${jobName} 失敗:`, error);
@@ -146,7 +258,14 @@ export class CronManager {
       return false;
     }
 
-    // 3. 顯示當前任務狀態
+    // 3. 創建檢查 Worker 缺席任務
+    const checkAbsenceCreated = await CronManager.createCheckWorkerAbsenceJob();
+    if (!checkAbsenceCreated) {
+      console.error("檢查 Worker 缺席任務創建失敗");
+      return false;
+    }
+
+    // 4. 顯示當前任務狀態
     const jobs = await CronManager.getCronJobsStatus();
     if (jobs.length > 0) {
       console.log("當前 cron 任務:");
