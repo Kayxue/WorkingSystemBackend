@@ -279,7 +279,7 @@ router.get("/detail/worker/:workerId", authenticated, requireEmployer, async (c)
     // 獲取打工者收到的所有評分
     const receivedRatings = await dbClient.query.workerRatings.findMany({
       where: eq(workerRatings.workerId, workerId),
-      columns: {  
+      columns: {
         ratingId: true,
         ratingValue: true,
         comment: true,
@@ -556,7 +556,7 @@ router.get("/my-ratings/worker", authenticated, requireWorker, async (c) => {
     const returnRatings = hasMore ? myRatings.slice(0, requestLimit) : myRatings;
 
     return c.json({
-      myRatings: returnRatings.map((rating) => ({
+      ratings: returnRatings.map((rating) => ({
         ratingId: rating.ratingId,
         employer: {
           employerId: rating.employer.employerId,
@@ -677,10 +677,9 @@ router.get("/received-ratings/employer", authenticated, requireEmployer, async (
 router.get("/received-ratings/worker", authenticated, requireWorker, async (c) => {
   try {
     const user = c.get("user");
-    const limit = c.req.query("limit") || "10";
-    const offset = c.req.query("offset") || "0";
-    const requestLimit = Number.parseInt(limit);
-    const requestOffset = Number.parseInt(offset);
+    const page = c.req.query("page")
+    const requestLimit = 10;
+    const requestOffset = requestLimit * (Number.parseInt(page) - 1) || 0;
     const workerId = user.workerId;
 
     // 獲取打工者收到的所有評分
@@ -718,29 +717,27 @@ router.get("/received-ratings/worker", authenticated, requireWorker, async (c) =
     const returnRatings = hasMore ? receivedRatings.slice(0, requestLimit) : receivedRatings;
 
     return c.json({
-      data: {
-        receivedRatings: returnRatings.map((rating) => ({
-          ratingId: rating.ratingId,
-          employer: {
-            employerId: rating.employer.employerId,
-            name: rating.employer.branchName ? `${rating.employer.employerName} - ${rating.employer.branchName}` : rating.employer.employerName,
-          },
-          gig: {
-            gigId: rating.gig.gigId,
-            title: rating.gig.title,
-            startDate: rating.gig.dateStart,
-            endDate: rating.gig.dateEnd,
-          },
-          ratingValue: rating.ratingValue,
-          comment: rating.comment,
-          createdAt: rating.createdAt,
-        })),
-        pagination: {
-          limit: requestLimit,
-          offset: requestOffset,
-          hasMore,
-          returned: returnRatings.length,
+      ratings: returnRatings.map((rating) => ({
+        ratingId: rating.ratingId,
+        employer: {
+          employerId: rating.employer.employerId,
+          name: rating.employer.branchName ? `${rating.employer.employerName} - ${rating.employer.branchName}` : rating.employer.employerName,
         },
+        gig: {
+          gigId: rating.gig.gigId,
+          title: rating.gig.title,
+          startDate: rating.gig.dateStart,
+          endDate: rating.gig.dateEnd,
+        },
+        ratingValue: rating.ratingValue,
+        comment: rating.comment,
+        createdAt: rating.createdAt,
+      })),
+      pagination: {
+        limit: requestLimit,
+        page: Number.parseInt(page) || 1,
+        hasMore,
+        returned: returnRatings.length,
       },
     }, 200);
   } catch (error) {
