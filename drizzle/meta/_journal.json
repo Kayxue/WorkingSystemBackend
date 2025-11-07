@@ -148,6 +148,13 @@
       "when": 1762451845704,
       "tag": "0020_curved_manta",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1762531974010,
+      "tag": "0021_material_rick_jones",
+      "breakpoints": true
     }
   ]
 }

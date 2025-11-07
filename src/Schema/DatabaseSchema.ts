@@ -50,6 +50,10 @@ export const workers = pgTable("workers", {
   // === FCM 推播通知相關欄位 ===
   fcmTokens: json("fcm_tokens").default([]), // 存儲多個 FCM tokens
 
+  // === 帳號鎖定狀態 ===
+  lockedUntil: timestamp("locked_until"), // NULL 表示未鎖定，有值表示鎖定到該時間
+  absenceCount: integer("absence_count").default(0).notNull(), // 缺席次數
+
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -106,6 +110,9 @@ export const employers = pgTable("employers", {
 
   // === FCM 推播通知相關欄位 ===
   fcmTokens: json("fcm_tokens").default([]), // 存儲多個 FCM tokens
+
+  // === 帳號鎖定狀態 ===
+  lockedUntil: timestamp("locked_until"), // NULL 表示未鎖定，有值表示鎖定到該時間
   
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
