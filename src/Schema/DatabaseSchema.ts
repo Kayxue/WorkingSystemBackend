@@ -436,7 +436,9 @@ export const messages = pgTable("messages", {
   conversationId: varchar("conversation_id", { length: 21 })
     .notNull()
     .references(() => conversations.conversationId, { onDelete: "cascade" }),
-  
+
+  gigId: varchar("gig_id", { length: 21 })
+    .references(() => gigs.gigId, { onDelete: "set null" }),
   // 發送者 (如果是 worker) 若不是則為 NULL
   senderWorkerId: varchar('sender_worker_id', { length:21 }).references(() => workers.workerId, {
     onDelete: 'set null', // 即使 worker 帳號刪除，也保留訊息
@@ -458,17 +460,21 @@ export const messages = pgTable("messages", {
 
   // 撤回時間
   retractedAt: timestamp('retracted_at', { withTimezone: true }),
-  },(table) => [
-    index('messages_conversation_ts_idx').on(
-      table.conversationId,
-      table.createdAt
-    ),
-    check(
-      'check_sender',
-      // 確保 senderWorkerId 和 senderEmployerId 中只有一個不是 NULL
-      sql`num_nonnulls(${table.senderWorkerId}, ${table.senderEmployerId}) = 1`
-    ),
-  ]
+
+  replyToId: varchar('reply_to_id').references(() => messages.messagesId, {
+    onDelete: 'set null', // 如果原始訊息被(硬)刪除，將此欄位設為 NULL
+  }),
+},(table) => [
+  index('messages_conversation_ts_idx').on(
+    table.conversationId,
+    table.createdAt
+  ),
+  check(
+    'check_sender',
+    // 確保 senderWorkerId 和 senderEmployerId 中只有一個不是 NULL
+    sql`num_nonnulls(${table.senderWorkerId}, ${table.senderEmployerId}) = 1`
+  ),
+]
 );
 
 // ==============================================
@@ -509,6 +515,7 @@ export const gigsRelations = relations(gigs, ({ one, many }) => ({
   employerRatings: many(employerRatings),
   attendanceCodes: many(attendanceCodes),
   attendanceRecords: many(attendanceRecords),
+  messages: many(messages),
 }));
 
 // GigApplications
@@ -599,7 +606,7 @@ export const conversationsRelations = relations(conversations, ({ one, many }) =
   messages: many(messages),
 }));
 
-export const messagesRelations = relations(messages, ({ one }) => ({
+export const messagesRelations = relations(messages, ({ one, many }) => ({
   conversation: one(conversations, {
     fields: [messages.conversationId],
     references: [conversations.conversationId],
@@ -613,5 +620,20 @@ export const messagesRelations = relations(messages, ({ one }) => ({
     fields: [messages.senderEmployerId],
     references: [employers.employerId],
     relationName: 'sentByEmployer',
+  }),
+  gig: one(gigs, {
+    fields: [messages.gigId],
+    references: [gigs.gigId],
+  }),
+  // "這條訊息" 是對 "另一條訊息" 的回覆
+  replyToMessage: one(messages, {
+    fields: [messages.replyToId],
+    references: [messages.id], 
+    relationName: 'messageReplyChain',
+  }),
+
+  // "這條訊息" 本身 "被" 多少條訊息回覆
+  replies: many(messages, {
+    relationName: 'messageReplyChain', 
   }),
 }));
