@@ -368,6 +368,7 @@ export const createNotificationSchema = z.object({
   message: z.string().min(1, "訊息不能為空"),
   type: notificationTypeEnum,
   resourceId: z.string().min(1).optional(),
+  additionalResourceId: z.string().min(1).optional(),
   sendPush: z.boolean().default(false),
 });
 
@@ -381,6 +382,7 @@ export const createBatchNotificationSchema = z.object({
   message: z.string().min(1, "訊息不能為空"),
   type: notificationTypeEnum,
   resourceId: z.string().min(1).optional(),
+  additionalResourceId: z.string().min(1).optional(),
 });
 
 export const createGroupNotificationSchema = z.object({
@@ -395,6 +397,7 @@ export const createGroupNotificationSchema = z.object({
   message: z.string().min(1, "訊息不能為空"),
   type: notificationTypeEnum,
   resourceId: z.string().min(1).optional(),
+  additionalResourceId: z.string().min(1).optional(),
   sendPush: z.boolean().default(false),
 });
 

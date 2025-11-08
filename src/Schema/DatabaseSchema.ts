@@ -379,6 +379,7 @@ export const notifications = pgTable("notifications", {
 
   // 關聯資源 ID
   resourceId: varchar("resource_id", { length: 21 }),
+  additionalResourceId: varchar("additional_resource_id", { length: 21 }),
 
   // 通知狀態
   isRead: boolean("is_read").default(false).notNull(),

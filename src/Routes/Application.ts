@@ -90,6 +90,7 @@ router.post(
         `${user.firstName} ${user.lastName}`,
         gig.title,
         gig.gigId,
+        newApplication[0].applicationId,
       );
 
         return c.json({
@@ -588,6 +589,7 @@ router.put(
           `${user.firstName} ${user.lastName}`,
           application.gig.title,
           application.gig.gigId,
+          applicationId,
         );
 
         return c.json({
@@ -614,6 +616,7 @@ router.put(
           `${user.firstName} ${user.lastName}`,
           application.gig.title,
           application.gig.gigId,
+          applicationId,
         );
 
         return c.json({
@@ -1105,6 +1108,7 @@ router.put(
           application.gig.title,
           user.employerName,
           application.gig.gigId,
+          applicationId,
         );
       } else if (action === "reject") {
         await NotificationHelper.notifyApplicationRejected(
@@ -1113,6 +1117,7 @@ router.put(
           application.gig.title,
           user.employerName,
           application.gig.gigId,
+          applicationId,
         );
       }
 

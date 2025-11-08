@@ -1,0 +1,1 @@
+ALTER TABLE "notifications" ADD COLUMN "additional_resource_id" varchar(21);

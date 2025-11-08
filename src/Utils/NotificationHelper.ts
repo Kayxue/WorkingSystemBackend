@@ -14,6 +14,7 @@ interface NotificationParams {
   message: string;
   type: NotificationType;
   resourceId?: string;
+  additionalResourceId?: string;
 }
 
 interface NotificationParamsWithRole extends NotificationParams {
@@ -188,6 +189,7 @@ class NotificationHelper {
             {
               type: params.type,
               resourceId: params.resourceId || "",
+              additionalResourceId: params.additionalResourceId || "",
             }
           );
         }
@@ -240,6 +242,7 @@ class NotificationHelper {
     workerName: string,
     gigTitle: string,
     resourceId: string,
+    additionalResourceId?: string, // applicationId
   ) {
     return this.create({
       receiverId: employerId,
@@ -248,6 +251,7 @@ class NotificationHelper {
       message: `${workerName} 申請了您的工作「${gigTitle}」，請及時處理。`,
       type: "application",
       resourceId,
+      additionalResourceId,
     }, true);
   }
 
@@ -257,6 +261,7 @@ class NotificationHelper {
     gigTitle: string,
     employerName: string,
     resourceId: string,
+    additionalResourceId?: string, // applicationId
   ) {
     return this.create({
       receiverId: workerId,
@@ -265,6 +270,7 @@ class NotificationHelper {
       message: `恭喜！您申請的工作「${gigTitle}」已被 ${employerName} 核准。`,
       type: "application",
       resourceId,
+      additionalResourceId,
     }, true);
   }
 
@@ -274,6 +280,7 @@ class NotificationHelper {
     gigTitle: string,
     employerName: string,
     resourceId: string,
+    additionalResourceId?: string, // applicationId
   ) {
     const message = `很抱歉，您申請的工作「${gigTitle}」被 ${employerName} 拒絕。`;
 
@@ -284,6 +291,7 @@ class NotificationHelper {
       message,
       type: "application",
       resourceId,
+      additionalResourceId,
     }, true);
   }
 
@@ -296,6 +304,7 @@ class NotificationHelper {
     gigTitle: string,
     employerName: string,
     resourceId: string,
+    additionalResourceId?: string, // applicationId
   ) {
     return this.create({
       receiverId: workerId,
@@ -304,6 +313,7 @@ class NotificationHelper {
       message: `${employerName} 已接受您對「${gigTitle}」的申請，請確認是否接受此工作。`,
       type: "application",
       resourceId,
+      additionalResourceId,
     }, true);
   }
 
@@ -316,6 +326,7 @@ class NotificationHelper {
     workerName: string,
     gigTitle: string,
     resourceId: string,
+    additionalResourceId?: string, // applicationId
   ) {
     return this.create({
       receiverId: employerId,
@@ -324,6 +335,7 @@ class NotificationHelper {
       message: `${workerName} 已確認接受工作「${gigTitle}」。`,
       type: "application",
       resourceId,
+      additionalResourceId,
     }, true);
   }
 
@@ -336,6 +348,7 @@ class NotificationHelper {
     workerName: string,
     gigTitle: string,
     resourceId: string,
+    additionalResourceId?: string, // applicationId
   ) {
     return this.create({
       receiverId: employerId,
@@ -344,6 +357,7 @@ class NotificationHelper {
       message: `${workerName} 拒絕接受工作「${gigTitle}」。`,
       type: "application",
       resourceId,
+      additionalResourceId,
     }, true);
   }
 
@@ -356,6 +370,7 @@ class NotificationHelper {
     gigTitle: string,
     reason: string,
     resourceId: string,
+    additionalResourceId?: string, // applicationId
   ) {
     return this.create({
       receiverId: workerId,
@@ -364,6 +379,7 @@ class NotificationHelper {
       message: `您的工作「${gigTitle}」申請已被系統取消。原因：${reason}`,
       type: "system",
       resourceId,
+      additionalResourceId,
     }, true);
   }
 
@@ -377,6 +393,7 @@ class NotificationHelper {
     gigTitle: string,
     reason: string,
     resourceId: string,
+    additionalResourceId?: string, // applicationId
   ) {
     return this.create({
       receiverId: employerId,
@@ -385,6 +402,7 @@ class NotificationHelper {
       message: `${workerName} 的工作「${gigTitle}」申請已被系統取消。原因：${reason}`,
       type: "system",
       resourceId,
+      additionalResourceId,
     }, true);
   }
 
@@ -394,6 +412,7 @@ class NotificationHelper {
     raterName: string,
     ratingValue: number,
     resourceId: string,
+    additionalResourceId?: string, // gigId
   ) {
     return this.create({
       receiverId,
@@ -402,6 +421,7 @@ class NotificationHelper {
       message: `${raterName} 給了您 ${ratingValue} 星評價，快去查看吧！`,
       type: "rating",
       resourceId,
+      additionalResourceId,
     }, true);
   }
 
@@ -505,9 +525,10 @@ class NotificationHelper {
     message: string,
     type: NotificationType,
     resourceId?: string,
+    additionalResourceId?: string,
   ) {
     const targetUsers = await this.getUserGroups(groups);
-    return this.createBatch(targetUsers, { title, message, type, resourceId });
+    return this.createBatch(targetUsers, { title, message, type, resourceId, additionalResourceId });
   }
 }
 

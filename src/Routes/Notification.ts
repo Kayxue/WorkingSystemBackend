@@ -44,6 +44,7 @@ router.get("/list", authenticated, async (c) => {
         isRead: true,
         createdAt: true,
         resourceId: true,
+        additionalResourceId: true,
       },
       limit: requestLimit + 1, // 多查一筆來確認是否有更多資料
       offset: requestOffset,
@@ -195,9 +196,9 @@ router.post("/create", authenticated, zValidator("json", createNotificationSchem
 // 批量建立通知 (管理員或系統內部使用)
 router.post("/create-batch", authenticated, zValidator("json", createBatchNotificationSchema), async (c) => {
   try {
-    const { receiverIds, title, message, type, resourceId } = c.req.valid("json");
+    const { receiverIds, title, message, type, resourceId, additionalResourceId } = c.req.valid("json");
 
-    const success = await NotificationHelper.createBatch(receiverIds, { title, message, type, resourceId });
+    const success = await NotificationHelper.createBatch(receiverIds, { title, message, type, resourceId, additionalResourceId });
 
     if (success) {
       return c.json({
@@ -222,10 +223,10 @@ router.post("/create-batch", authenticated, zValidator("json", createBatchNotifi
 // 發送通知給指定用戶群組 (管理員或系統內部使用)
 router.post("/create-group", authenticated, zValidator("json", createGroupNotificationSchema), async (c) => {
   try {
-    const { groups, title, message, type, resourceId, sendPush } = c.req.valid("json");
+    const { groups, title, message, type, resourceId, additionalResourceId, sendPush } = c.req.valid("json");
 
     // 建立通知記錄
-    const success = await NotificationHelper.notifyUserGroups(groups, title, message, type, resourceId);
+    const success = await NotificationHelper.notifyUserGroups(groups, title, message, type, resourceId, additionalResourceId);
 
     if (!success) {
       return c.json({
@@ -237,6 +238,7 @@ router.post("/create-group", authenticated, zValidator("json", createGroupNotifi
       const pushData = {
         type,
         resourceId: resourceId || "",
+        additionalResourceId: additionalResourceId || "",
       };
 
       const targetRoles: Role[] = [];
