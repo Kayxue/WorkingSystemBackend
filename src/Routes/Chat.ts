@@ -2,16 +2,15 @@ import { Hono } from "hono";
 import { createBunWebSocket } from 'hono/bun';
 import type IRouter from "../Interfaces/IRouter";
 import type { HonoGenericContext } from "../Types/types";
-import { authenticate, authenticated, deserializeUser } from "../Middleware/authentication";
+import { authenticated } from "../Middleware/authentication";
 import type { ServerWebSocket } from 'bun';
-// import db from "../Client/DrizzleClient";
 import { and, eq, avg, count, sql, gt, isNull, getTableColumns, desc, isNotNull, lt } from "drizzle-orm";
-import {workers, employers, conversations, messages} from "../Schema/DatabaseSchema";
+import {workers, employers, conversations, messages, gigs} from "../Schema/DatabaseSchema";
 import dbClient from "../Client/DrizzleClient";
 import { zValidator } from "@hono/zod-validator";
 import { queryGetMessageSchema } from "../Types/zodSchema";
 import {FileManager} from "../Client/Cache/Index";
-import { id } from "zod/v4/locales";
+import { requireWorker } from "../Middleware/guards";
 
 const router = new Hono<HonoGenericContext>();
 
@@ -55,7 +54,6 @@ router.get("/ws/chat", authenticated, upgradeWebSocket((c) => {
 		onOpen: (event, ws) => {
 			const rawWs = ws.raw as ServerWebSocket;
 			if (user.userId && user.role) {
-				console.log("user channel:", getUserChannel(user.userId, user.role));
 				rawWs.subscribe(getUserChannel(user.userId, user.role));
 				console.log(`用戶 ${user.role}:${user.userId} 已連線。`);
 				ws.send(JSON.stringify({ type: 'connection_success' }));
@@ -75,17 +73,10 @@ router.get("/ws/chat", authenticated, upgradeWebSocket((c) => {
 				console.error('無法解析的訊息:', event.data);
 				return;
 			}
-
-			// if (message.type == 'test') {
-			// 	console.log("is user subscribed:", rawWs.isSubscribed(getUserChannel(user.userId, user.role)));
-			// 	rawWs.publish(getUserChannel(user.userId, user.role), "This is a test message");
-			// 	ws.send(JSON.stringify({ type: 'test_ack', text: 'Test message sent' }));
-			// 	return;
-			// }
 			
 			// --- 2. 處理私訊 ---
 			if (message.type === 'private_message') {
-				const { recipientId, text, type } = message;
+				const { recipientId, text, type, replyToId } = message;
 				const recipientRole = user.role === 'worker' ? 'employer' : 'worker';
 				const {workerID , employerID} = user.role === 'worker' ? 
 					{workerID: user.userId, employerID: recipientId} : 
@@ -103,6 +94,7 @@ router.get("/ws/chat", authenticated, upgradeWebSocket((c) => {
 							content: text,
 							senderWorkerId: senderRole === 'worker' ? senderId : null,
 							senderEmployerId: senderRole === 'employer' ? senderId : null,
+							replyToId: replyToId || null,
 						})
 						.returning();
 
@@ -162,21 +154,6 @@ router.get("/ws/chat", authenticated, upgradeWebSocket((c) => {
 					});
 					rawWs.send(payload);
 					rawWs.publish(getUserChannel(message.recipientId, senderRole === 'worker' ? 'employer' : 'worker'), payload);
-					// const convo = await db.query.conversations.findFirst({
-					// 	where: eq(chatSchema.conversations.id, updatedMessage.conversationId),
-					// 	columns: { workerId: true, employerId: true }
-					// });
-
-					// if (convo) {
-					// 	const payload = JSON.stringify({
-					// 		type: 'message_retracted',
-					// 		messageId: updatedMessage.id,
-					// 	});
-					// 	// 通知 Worker
-					// 	ws.publish(getUserChannel(convo.workerId, 'worker'), payload);
-					// 	// 通知 Employer
-					// 	ws.publish(getUserChannel(convo.employerId, 'employer'), payload);
-					// }
 				} catch (err: any) {
 					console.error('撤回失敗:', err.message);
 					rawWs.send(JSON.stringify({ type: 'error', text: err.message }));
@@ -346,41 +323,73 @@ router.get('/conversations/:conversationId/messages', authenticated
     // 決定游標 (cursor)
     const cursor = before ? new Date(before) : new Date();
 
-    const resultMessages = await dbClient
-      .select({
-				messagesId: messages.messagesId,
-				conversationId: messages.conversationId,
-				senderWorkerId: messages.senderWorkerId,
-				senderEmployerId: messages.senderEmployerId,
-				content: messages.content,
-				createdAt: messages.createdAt,
-				retractedAt: messages.retractedAt,		
-		})
-      .from(messages)
-      .where(
-        and(
-          eq(messages.conversationId, conversationId),
-          eq(myDeletedFlag, false), // 1. 我沒有刪除這條訊息
-          lt(messages.createdAt, cursor) // 2. 用於分頁
-          // (安全檢查：應確保用戶是此對話成員，為簡化暫省略)
-        )
-      )
-      .orderBy(desc(messages.createdAt))
-      .limit(limit);
+    const resultMessages = await dbClient.query.messages.findMany({
+      where: and(
+        eq(messages.conversationId, conversationId),
+        eq(myDeletedFlag, false),
+        lt(messages.createdAt, cursor)
+      ),
+      orderBy: [desc(messages.createdAt)],
+      limit: limit,
 
-
-    // 處理已撤回的訊息
-    const processedMessages = resultMessages.map((msg) => {
-      if (msg.retractedAt) {
-        return {
-          ...msg,
-          content: '[訊息已撤回]', // 遮蔽內容
-        };
-      }
-      return msg;
+      // ✨ 關鍵：預先載入 "被回覆的訊息" 及其 "發送者"
+      with: {
+        replyToMessage: true,
+        gig: true, 
+      },
     });
 
-    return c.json(processedMessages.reverse()); // 反轉陣列，讓前端能正向顯示 (舊 -> 新)
+	// --- 處理回傳資料 (已修改) ---
+	const processedMessages = resultMessages.map((msg) => {
+		// 1. 處理已撤回的訊息
+		if (msg.retractedAt) {
+			return {
+				...msg,
+				content: '[訊息已撤回]',
+				// ... (清除 senderId 等)
+				replyToMessage: null, // 撤回的訊息不顯示回覆
+				gig: null, // 撤回的訊息不顯示 gig
+			};
+		}
+
+		// 2. 處理回覆
+		let replySnippet = null;
+		if (msg.replyToMessage) {
+			const repliedToMsg:{
+				messagesId: string;
+				content: string;
+				retractedAt: Date | null;
+				createdAt: Date;
+			} = msg.replyToMessage;
+
+			
+
+			replySnippet = {
+				messagesId: repliedToMsg.messagesId,
+				// 如果被回覆的訊息也被撤回了，顯示 "[訊息已撤回]"
+				content: repliedToMsg.retractedAt ? '[訊息已撤回]' : repliedToMsg.content,
+				createdAt: repliedToMsg.createdAt,
+			};
+		}
+
+		return {
+			// ... (msg 的所有欄位, id, content, createdAt, ...)
+			messagesId: msg.messagesId,
+			conversationId: msg.conversationId,
+			gigId: msg.gigId,
+			senderWorkerId: msg.senderWorkerId,
+			senderEmployerId: msg.senderEmployerId,
+			content: msg.content,
+			createdAt: msg.createdAt,
+			replyToId: msg.replyToId,
+			
+			// ✨ 新增：回傳簡化版的 "被回覆訊息" 物件
+			replySnippet: replySnippet, 
+			gig: msg.gig, // ✨ 新增：回傳完整的 gig 物件
+		};
+	});
+
+    return c.json(processedMessages.reverse()); // 反轉以正序顯示
   }
 );
 
@@ -443,8 +452,8 @@ router.delete('/messages/:messageId', authenticated, async (c) => {
 
   // 2. 權限檢查
   const isParticipant =
-    (user.role === 'worker' && message.conversation.workerId === user.userId) ||
-    (user.role === 'employer' && message.conversation.employerId === user.userId);
+    (user.role === 'worker' && message[0].conversation.workerId === user.userId) ||
+    (user.role === 'employer' && message[0].conversation.employerId === user.userId);
 
   if (!isParticipant) {
     return c.json({ error: 'Access denied' }, 403);
@@ -527,6 +536,54 @@ router.post('/conversations/:conversationId/read', authenticated, async (c) => {
   server.publish(myChannel, payload);
 
   return c.json({ success: true, readAt: readAtTime });
+});
+
+// ----------------------------------------------------
+// 6. 發送工作資訊訊息 (Send Gig Info Message)
+// POST /api/chat/gig/:employerId/:gigId
+// ----------------------------------------------------
+router.post('/gig/:employerId/:gigId', authenticated, requireWorker, async (c) => {
+  const { employerId, gigId } = c.req.param();
+  const user = c.get('user');
+	const server = c.get('server');
+
+  // 1. 查詢工作資訊
+  const gig = await dbClient.query.gigs.findFirst({
+    where: and(
+			eq(gigs.gigId, gigId),
+			eq(gigs.employerId, employerId)
+		),
+  });
+
+  if (!gig) {
+    return c.json({ error: 'Gig not found' }, 404);
+  }
+
+	// 2. 查找或創建對話
+	const conversationId = await findOrCreateConversation(user.userId, employerId);
+	
+	// 3. 儲存訊息
+	const [savedMessage] = await dbClient
+		.insert(messages)
+		.values({
+			conversationId,
+			senderWorkerId: user.userId,
+			content: `應聘者正在詢問此工作`,
+		})
+		.returning();
+
+	// 4. 準備推播的 payload
+	const payload = JSON.stringify({
+		type: 'gig_message',
+		...savedMessage,
+		gig: gig, // 將 gig 資訊附加到 payload
+	});
+
+	// 5. 推播給接收者和自己
+	server.publish(getUserChannel(user.userId, 'worker'), payload);
+	server.publish(getUserChannel(employerId, 'employer'), payload);
+
+  return c.json({ success: true, message: savedMessage });
 });
 
 export default { path: "/chat", router } as IRouter;

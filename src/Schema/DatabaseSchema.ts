@@ -628,7 +628,7 @@ export const messagesRelations = relations(messages, ({ one, many }) => ({
   // "這條訊息" 是對 "另一條訊息" 的回覆
   replyToMessage: one(messages, {
     fields: [messages.replyToId],
-    references: [messages.id], 
+    references: [messages.messagesId], 
     relationName: 'messageReplyChain',
   }),
 
