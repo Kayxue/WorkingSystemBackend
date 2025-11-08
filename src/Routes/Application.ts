@@ -430,7 +430,7 @@ router.get("/:applicationId/conflicts", authenticated, requireWorker, async (c) 
         })),
         pagination: {
           limit: requestLimit,
-          offset: requestOffset,
+          page: Number.parseInt(page) || 1,
           hasMore,
           returned: actualResults.length,
         },
