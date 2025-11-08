@@ -174,8 +174,7 @@ router.get("/my-applications", authenticated, requireWorker, async (c) => {
   try {
     const user = c.get("user");
     const status = c.req.query("status");
-    const limit = c.req.query("limit") || "10";
-    const offset = c.req.query("offset") || "0";
+    const page = c.req.query("page")
     const search = c.req.query("search") || "";
 
     // 建立狀態過濾
@@ -197,8 +196,8 @@ router.get("/my-applications", authenticated, requireWorker, async (c) => {
       statusFilter = `AND app.status = '${status}'`;
     }
 
-    const requestLimit = Number.parseInt(limit);
-    const requestOffset = Number.parseInt(offset);
+    const requestLimit = 10;
+    const requestOffset = requestLimit * (Number.parseInt(page) - 1) || 0;
 
     const applicationsWithConflicts = await dbClient.execute(sql`
       WITH current_applications AS (
@@ -304,8 +303,8 @@ router.get("/my-applications", authenticated, requireWorker, async (c) => {
       })),
       pagination: {
         limit: requestLimit,
-        offset: requestOffset,
-        hasMore: hasMore,
+        page: Number.parseInt(page) || 1,
+        hasMore,
         returned: actualResults.length,
       },
     }, 200);
@@ -327,8 +326,8 @@ router.get("/:applicationId/conflicts", authenticated, requireWorker, async (c) 
     const user = c.get("user");
     const applicationId = c.req.param("applicationId");
     const type = c.req.query("type");
-    const limit = c.req.query("limit") || "10";
-    const offset = c.req.query("offset") || "0";
+    const page = c.req.query("page")
+
 
     if (!type || (type !== "confirmed" && type !== "pending")) {
       return c.json({
@@ -336,8 +335,8 @@ router.get("/:applicationId/conflicts", authenticated, requireWorker, async (c) 
       }, 400);
     }
 
-    const requestLimit = Number.parseInt(limit);
-    const requestOffset = Number.parseInt(offset);
+    const requestLimit = 10;
+    const requestOffset = requestLimit * (Number.parseInt(page) - 1) || 0;
 
     // 查找申請記錄
     const application = await dbClient.query.gigApplications.findFirst({
@@ -505,7 +504,7 @@ router.get("/:applicationId/conflicts", authenticated, requireWorker, async (c) 
         })),
         pagination: {
           limit: requestLimit,
-          offset: requestOffset,
+          page: Number.parseInt(page) || 1,
           hasMore,
           returned: actualResults.length,
         },
