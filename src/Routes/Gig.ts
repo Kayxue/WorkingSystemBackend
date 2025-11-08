@@ -417,7 +417,7 @@ router.get("/public/:gigId", async (c) => {
   }
 });
 
-// Worker 獲取已確認工作的詳情
+// Worker 獲取工作的詳情
 router.get("/worker/:gigId", authenticated, requireWorker, async (c) => {
   try {
     const user = c.get("user");
@@ -427,12 +427,10 @@ router.get("/worker/:gigId", authenticated, requireWorker, async (c) => {
       return c.json({ error: "Gig ID is required" }, 400);
     }
 
-    // 檢查 worker 是否已確認此工作
     const application = await dbClient.query.gigApplications.findFirst({
       where: and(
         eq(gigApplications.workerId, user.workerId),
         eq(gigApplications.gigId, gigId),
-        eq(gigApplications.status, "worker_confirmed")
       ),
       columns: {
         applicationId: true,
