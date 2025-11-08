@@ -8,12 +8,13 @@ import { Glob } from "bun";
 import type IRouter from "./Interfaces/IRouter";
 import redisClient from "./Client/RedisClient";
 import { CronManager } from "./Utils/CronManager";
-import { createBunWebSocket } from 'hono/bun';
+import { createBunWebSocket} from 'hono/bun';
+import type { Server } from 'bun';
 
 const app = new Hono<HonoGenericContext>();
 const { websocket } = createBunWebSocket();
 
-app.use("*", async (c, next) => {
+app.use('/chat/*', async (c, next) => {
   const start = Date.now();
   const timestamp = new Date().toISOString();
   const api = c.req.path;
@@ -61,6 +62,15 @@ app.use(
   })
 );
 
+// 宣告一個變數來持有 Server 實例
+let serverInstance: Server;
+
+// 全域中介軟體，將 server 實例注入到 context
+app.use('/chat/*', async (c, next) => {
+  c.set('server', serverInstance);
+  await next();
+});
+
 app.get("/", (c) => {
   return c.text("Hello!");
 });
@@ -106,6 +116,14 @@ initializeSystem().catch((error) => {
 });
 
 export default {
-  fetch: app.fetch,
-  websocket,
-}
+  port: 3000,
+  websocket: websocket,
+  fetch(req: Request, server: Server) {
+    // 在第一次請求時捕獲 server 實例
+    if (!serverInstance) {
+      serverInstance = server;
+    }
+    // 將請求交給 Hono 處理
+    return app.fetch(req, server);
+  },
+};

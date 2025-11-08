@@ -458,3 +458,8 @@ export const sendTestPushSchema = z.object({
   message: z.string().min(1, "訊息不能為空"),
   data: z.record(z.string(), z.string()).optional(),
 });
+
+export const queryGetMessageSchema = z.object({
+  limit: z.coerce.number().min(1).max(50).default(30),
+  before: z.string().datetime().optional(),
+});

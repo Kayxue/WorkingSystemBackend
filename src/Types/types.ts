@@ -12,5 +12,5 @@ export type sessionUser = {
 };
 
 export type HonoGenericContext = {
-  Variables: { session: Session<sessionUser>; session_key_rotation: boolean; user: any & { role: Role }; uploadedFiles: Record<string, any> };
+  Variables: { session: Session<sessionUser>; session_key_rotation: boolean; user: any & { role: Role }; uploadedFiles: Record<string, any>; server: Bun.Server };
 };
