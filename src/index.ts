@@ -10,6 +10,7 @@ import redisClient from "./Client/RedisClient";
 import { CronManager } from "./Utils/CronManager";
 import { createBunWebSocket} from 'hono/bun';
 import type { Server } from 'bun';
+import webSocketManager from "./Utils/WebSocketManager";
 
 const app = new Hono<HonoGenericContext>();
 const { websocket } = createBunWebSocket();
@@ -62,7 +63,6 @@ app.use(
   })
 );
 
-// 宣告一個變數來持有 Server 實例
 let serverInstance: Server;
 
 // 全域中介軟體，將 server 實例注入到 context
@@ -98,10 +98,10 @@ async function initializeSystem() {
     console.error("Redis 快取連接失敗:", error);
   }
 
-  // 初始化 Cron 任務
+  // 初始化 Cron 任務 、WebSocket Manager
   try {
     const cronInitialized = await CronManager.initializeCronJobs();
-
+    webSocketManager.initializeCleanup();
     if (cronInitialized) {
       console.log("Cron 任務初始化完成");
     }
@@ -117,7 +117,7 @@ initializeSystem().catch((error) => {
 
 export default {
   port: 3000,
-  websocket: websocket,
+  websocket: websocket ,
   fetch(req: Request, server: Server) {
     // 在第一次請求時捕獲 server 實例
     if (!serverInstance) {

@@ -4,7 +4,7 @@ import type IRouter from "../Interfaces/IRouter";
 import type { HonoGenericContext } from "../Types/types";
 import { authenticated } from "../Middleware/authentication";
 import type { ServerWebSocket } from 'bun';
-import { and, eq, avg, count, sql, gt, isNull, getTableColumns, desc, isNotNull, lt } from "drizzle-orm";
+import { and, eq, sql, gt, isNull, desc, lt } from "drizzle-orm";
 import {workers, employers, conversations, messages, gigs} from "../Schema/DatabaseSchema";
 import dbClient from "../Client/DrizzleClient";
 import { zValidator } from "@hono/zod-validator";
@@ -12,12 +12,14 @@ import { queryGetMessageSchema } from "../Types/zodSchema";
 import {FileManager} from "../Client/Cache/Index";
 import { requireWorker } from "../Middleware/guards";
 import { sign, verify } from 'hono/jwt';
+import webSocketManager from "../Utils/WebSocketManager";
 
 const router = new Hono<HonoGenericContext>();
 const JWT_SECRET = process.env.JWT_SECRET;
 
 const getUserChannel = (userId: string, role: string) =>
   `user:${role}:${userId}`;
+
 const { upgradeWebSocket} = createBunWebSocket();
 
 async function getUserIdAndRoleFromToken(token: string) {
@@ -26,7 +28,7 @@ async function getUserIdAndRoleFromToken(token: string) {
     if (!payload.sub || !payload.role) {
       return { id: null, role: null };
     }
-    // 檢查 'role' 是否為我們所期望的
+    // 檢查 'role' 是否正確
     const role = payload.role as string;
     if (role !== 'worker' && role !== 'employer') {
       return { id: null, role: null };
@@ -76,13 +78,13 @@ router.get('/ws-token', authenticated, async (c) => {
     return c.json({ error: 'Not authenticated' }, 401);
   }
 
-  // 產生一個短時效 (例如 60 秒) 的 Token
+  // 產生一個短時效 (例如 20 秒) 的 Token
   // 'sub' (Subject) 儲存用戶 ID
   const token = await sign(
     {
       sub: user.userId,
       role: role,
-      exp: Math.floor(Date.now() / 1000) + 60, // 60 秒後過期
+      exp: Math.floor(Date.now() / 1000) + 20, // 20 秒後過期
     },
     JWT_SECRET
   );
@@ -91,35 +93,33 @@ router.get('/ws-token', authenticated, async (c) => {
 });
 
 router.get("/ws/chat", upgradeWebSocket((c) => {
-	// const user = c.get("user");
 	return {
 		data: {
 			userId: null as string | null,
 			role: null as 'worker' | 'employer' | null,
+			connectionId: null as string | null,
 		},
 
 		onOpen: (event, ws) => {
-			// const rawWs = ws.raw as ServerWebSocket;
-			// if (user.userId && user.role) {
-			// 	rawWs.subscribe(getUserChannel(user.userId, user.role));
 			console.log(`一個用戶已連線，等待驗證。`);
-			// 	ws.send(JSON.stringify({ type: 'connection_success' }));
-			// } else {
-			// 	ws.close(1008, 'Failed in authentication');
-			// }
 		},
 
 		onMessage: async (event, ws) => {
 			let message;
 			const rawWs = ws.raw as ServerWebSocket;
 			const userId = ws.raw.data.events.data.userId;
-			const role = ws.raw.data.events.data.role;
-			// const senderRole = user.role;
-			// const senderId = user.userId;
+			const userRole = ws.raw.data.events.data.role;
+
 			try {
 				message = JSON.parse(event.data as string);
 			} catch (error) {
 				console.error('無法解析的訊息:', event.data);
+				rawWs.close(1003, 'Invalid message format');
+				return;
+			}
+
+			if (message.type === 'heartbeat' && userId) {
+				webSocketManager.handleHeartbeat(rawWs);
 				return;
 			}
 
@@ -130,6 +130,9 @@ router.get("/ws/chat", upgradeWebSocket((c) => {
 						// 驗證成功！
 						ws.raw.data.events.data.userId = id;
 						ws.raw.data.events.data.role = role;
+
+						// 將連線添加到管理器
+						webSocketManager.addConnection(rawWs);
 
 						// 訂閱自己的私有頻道 (用於多設備同步和接收訊息)
 						rawWs.subscribe(getUserChannel(id, role));
@@ -149,100 +152,96 @@ router.get("/ws/chat", upgradeWebSocket((c) => {
 				return; // 結束此 'onMessage' 處理
 			}
 
-			if (message.type === 'ping') {
-				ws.send(JSON.stringify({ type: 'pong' }));
+			// --- 2. 處理私訊 ---
+			if (message.type === 'private_message') {
+				const { recipientId, text, type, replyToId } = message;
+				const recipientRole = userRole === 'worker' ? 'employer' : 'worker';
+				const {workerID , employerID} = userRole === 'worker' ? 
+					{workerID: userId, employerID: recipientId} : 
+					{workerID: recipientId, employerID: userId};
+				
+				try {
+					// 1. 查找或創建對話
+					const conversationId = await findOrCreateConversation(workerID, employerID);
+					
+					// 2. 儲存訊息
+					const [savedMessage] = await dbClient
+						.insert(messages)
+						.values({
+							conversationId: conversationId,
+							content: text,
+							senderWorkerId: userRole === 'worker' ? userId : null,
+							senderEmployerId: userRole === 'employer' ? userId : null,
+							replyToId: replyToId || null,
+						})
+						.returning();
+
+					// 3. 準備推播的 payload
+					const payload = JSON.stringify({
+						type: 'private_message',
+						...savedMessage,
+					});
+
+					// 4. 推播給接收者
+					rawWs.publish(getUserChannel(recipientId, recipientRole), payload);
+					// 5. 推播給自己 (多設備同步)
+					rawWs.send(payload);
+				
+				} catch (error) {
+					console.error('訊息發送失敗:', error);
+					rawWs.send(JSON.stringify({ type: 'error', text: 'Failed to send message' }));
+				}
 			}
 
-			// // --- 2. 處理私訊 ---
-			// if (message.type === 'private_message') {
-			// 	const { recipientId, text, type, replyToId } = message;
-			// 	const recipientRole = user.role === 'worker' ? 'employer' : 'worker';
-			// 	const {workerID , employerID} = user.role === 'worker' ? 
-			// 		{workerID: user.userId, employerID: recipientId} : 
-			// 		{workerID: recipientId, employerID: user.userId};
-				
-			// 	try {
-			// 		// 1. 查找或創建對話
-			// 		const conversationId = await findOrCreateConversation(workerID, employerID);
-					
-			// 		// 2. 儲存訊息
-			// 		const [savedMessage] = await dbClient
-			// 			.insert(messages)
-			// 			.values({
-			// 				conversationId: conversationId,
-			// 				content: text,
-			// 				senderWorkerId: senderRole === 'worker' ? senderId : null,
-			// 				senderEmployerId: senderRole === 'employer' ? senderId : null,
-			// 				replyToId: replyToId || null,
-			// 			})
-			// 			.returning();
+			// --- 3. 處理訊息撤回 ---
+			if (message.type === 'retract_message') {
+				const { messageId } = message;
+				const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000);
+				try {
+					// 更新訊息狀態 (帶有 3 小時和發送者驗證)
+					const [updatedMessage] = await dbClient
+						.update(messages)
+						.set({
+							retractedAt: new Date(),
+							content: '[訊息已撤回]', // (可選)
+						})
+						.where(
+							and(
+								eq(messages.messagesId, messageId),
+								// 條件 1: 我是發送者
+								userRole === 'worker'
+									? eq(messages.senderWorkerId, userId)
+									: eq(messages.senderEmployerId, userId),
+								gt(messages.createdAt, threeHoursAgo), // 條件 2: 3 小時內
+								isNull(messages.retractedAt) // 條件 3: 未被撤回
+							)
+						)
+						.returning({
+							id: messages.messagesId,
+							conversationId: messages.conversationId
+						});
 
-			// 		// 3. 準備推播的 payload
-			// 		const payload = JSON.stringify({
-			// 			type: 'private_message',
-			// 			...savedMessage,
-			// 		});
+					if (!updatedMessage) {
+						throw new Error('撤回失敗 (可能已超時或權限不足)');
+					}
 
-			// 		// 4. 推播給接收者
-			// 		rawWs.publish(getUserChannel(recipientId, recipientRole), payload);
-			// 		// 5. 推播給自己 (多設備同步)
-			// 		rawWs.send(payload);
-				
-			// 	} catch (error) {
-			// 		console.error('訊息發送失敗:', error);
-			// 		rawWs.send(JSON.stringify({ type: 'error', text: 'Failed to send message' }));
-			// 	}
-			// }
-
-			// // --- 3. 處理訊息撤回 ---
-			// if (message.type === 'retract_message') {
-			// 	const { messageId } = message;
-			// 	const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000);
-			// 	try {
-			// 		// 更新訊息狀態 (帶有 3 小時和發送者驗證)
-			// 		const [updatedMessage] = await dbClient
-			// 			.update(messages)
-			// 			.set({
-			// 				retractedAt: new Date(),
-			// 				content: '[訊息已撤回]', // (可選)
-			// 			})
-			// 			.where(
-			// 				and(
-			// 					eq(messages.messagesId, messageId),
-			// 					// 條件 1: 我是發送者
-			// 					senderRole === 'worker'
-			// 						? eq(messages.senderWorkerId, senderId)
-			// 						: eq(messages.senderEmployerId, senderId),
-			// 					gt(messages.createdAt, threeHoursAgo), // 條件 2: 3 小時內
-			// 					isNull(messages.retractedAt) // 條件 3: 未被撤回
-			// 				)
-			// 			)
-			// 			.returning({
-			// 				id: messages.messagesId,
-			// 				conversationId: messages.conversationId
-			// 			});
-
-			// 		if (!updatedMessage) {
-			// 			throw new Error('撤回失敗 (可能已超時或權限不足)');
-			// 		}
-
-			// 		// 撤回成功，通知對話中的 *雙方*
-			// 		const payload = JSON.stringify({
-			// 			type: 'message_retracted',
-			// 			messageId: updatedMessage.id,
-			// 		});
-			// 		rawWs.send(payload);
-			// 		rawWs.publish(getUserChannel(message.recipientId, senderRole === 'worker' ? 'employer' : 'worker'), payload);
-			// 	} catch (err: any) {
-			// 		console.error('撤回失敗:', err.message);
-			// 		rawWs.send(JSON.stringify({ type: 'error', text: err.message }));
-			// 	}
-			// }
+					// 撤回成功，通知對話中的 *雙方*
+					const payload = JSON.stringify({
+						type: 'message_retracted',
+						messageId: updatedMessage.id,
+					});
+					rawWs.send(payload);
+					rawWs.publish(getUserChannel(message.recipientId, userRole === 'worker' ? 'employer' : 'worker'), payload);
+				} catch (err: any) {
+					console.error('撤回失敗:', err.message);
+					rawWs.send(JSON.stringify({ type: 'error', text: err.message }));
+				}
+			}
 		},
 		onClose: (event, ws) => {
-			const userId = ws.raw.data.events.data.userId;
-			const role = ws.raw.data.events.data.role;
-			console.log(`用戶 ${role}:${userId} 已斷線。`);
+			if (ws.raw.data.events.data.connectionId) {
+				webSocketManager.removeConnection(ws.raw as ServerWebSocket);
+			}
 			// Bun 會自動處理取消訂閱 (unsubscribe)
 		},
 
@@ -338,8 +337,6 @@ router.get('/conversations', authenticated, async (c) => {
 
   // 處理最後一條訊息被撤回的情況
   const processedConversations = await Promise.all(resultConversations.map(async (convo) => {
-    // (這裡需要額外的邏輯來檢查 lastMessage 是否已被撤回，
-    // 為簡化起見，上面的 SQL 已排除了撤回的訊息)
 		if (convo.opponent == null) {
 			return {
 				...convo,
@@ -413,7 +410,7 @@ router.get('/conversations/:conversationId/messages', authenticated
       orderBy: [desc(messages.createdAt)],
       limit: limit,
 
-      // ✨ 關鍵：預先載入 "被回覆的訊息" 及其 "發送者"
+      // 預先載入 "被回覆的訊息" 及其 "發送者"
       with: {
         replyToMessage: true,
         gig: true, 
