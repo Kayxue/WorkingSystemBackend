@@ -8,11 +8,11 @@ const HEARTBEAT_INTERVAL = 30000; // 30 秒
 const CLEANUP_INTERVAL = 15000; // 15 秒
 
 type WebSocketData = {
-  connectionId: string;
   events: {
     data: {
       userId: string | null;
       role: "worker" | "employer" | null;
+       connectionId: string;
     };
   };
 };
@@ -20,9 +20,11 @@ type WebSocketData = {
 export class WebSocketManager {
   private static instance: WebSocketManager;
   private connections: Map<string, ServerWebSocket<WebSocketData>>;
+  private heartbeatIntervals: Map<string, Timer>; // 新增：儲存每個連線的心跳定時器
 
   private constructor() {
     this.connections = new Map();
+    this.heartbeatIntervals = new Map(); // 初始化
   }
 
   public static getInstance(): WebSocketManager {
@@ -51,6 +53,12 @@ export class WebSocketManager {
     }
     pipeline.exec();
 
+    // 啟動週期性心跳請求
+    const intervalId = setInterval(() => {
+      this.requestHeartbeat(ws);
+    }, HEARTBEAT_INTERVAL / 2); // 比清理間隔短，確保在清理前發送心跳
+    this.heartbeatIntervals.set(connectionId, intervalId);
+
     // 立即發送一次心跳請求，確保客戶端有回應
     this.requestHeartbeat(ws);
   }
@@ -69,6 +77,13 @@ export class WebSocketManager {
 
     this.connections.delete(connectionId);
 
+    // 清除該連線的心跳定時器
+    const intervalId = this.heartbeatIntervals.get(connectionId);
+    if (intervalId) {
+      clearInterval(intervalId);
+      this.heartbeatIntervals.delete(connectionId);
+    }
+
     // 使用 pipeline 提高效率
     const pipeline = redisClient.pipeline();
     pipeline.zrem(CONNECTION_SET_KEY, connectionId);
@@ -77,19 +92,17 @@ export class WebSocketManager {
   }
 
   public handleHeartbeat(ws: ServerWebSocket<WebSocketData>) {
-    const connectionId = ws.data.connectionId;
+    const connectionId = ws.data.events.data.connectionId;
     if (!connectionId) return;
-
     const now = Date.now();
     redisClient.zadd(CONNECTION_SET_KEY, "XX", now, connectionId);
-    // console.log(`[WebSocketManager] 收到來自 ${connectionId} 的心跳。`);
   }
 
   private requestHeartbeat(ws: ServerWebSocket<WebSocketData>) {
     try {
       ws.send(JSON.stringify({ type: "heartbeat_request" }));
     } catch (error) {
-      console.error(`[WebSocketManager] 無法向 ${ws.data.connectionId} 發送心跳請求:`, error);
+      console.error(`[WebSocketManager] 無法向 ${ws.data.events.data.connectionId} 發送心跳請求:`, error);
       this.removeConnection(ws);
     }
   }
@@ -111,7 +124,6 @@ export class WebSocketManager {
           for (const connectionId of expiredConnectionIds) {
             const ws = this.connections.get(connectionId);
             if (ws) {
-              console.log(`[WebSocketManager] 關閉超時連線: ${connectionId}`);
               ws.close(1000, "Heartbeat timeout");
               // onClose 事件會觸發 removeConnection
             } else {
