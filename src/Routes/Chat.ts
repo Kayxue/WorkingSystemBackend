@@ -92,7 +92,7 @@ router.get('/ws-token', authenticated, async (c) => {
   return c.json({ token });
 });
 
-router.get("/ws/chat", upgradeWebSocket((c) => {
+router.get("/ws", upgradeWebSocket((c) => {
 	return {
 		data: {
 			userId: null as string | null,
@@ -460,6 +460,7 @@ router.get('/conversations/:conversationId/messages', authenticated
 			content: msg.content,
 			createdAt: msg.createdAt,
 			replyToId: msg.replyToId,
+      retractedAt: msg.retractedAt,
 			
 			// ✨ 新增：回傳簡化版的 "被回覆訊息" 物件
 			replySnippet: replySnippet, 
@@ -645,6 +646,7 @@ router.post('/gig/:employerId/:gigId', authenticated, requireWorker, async (c) =
 		.insert(messages)
 		.values({
 			conversationId,
+      gigId: gigId,
 			senderWorkerId: user.userId,
 			content: `應聘者正在詢問此工作`,
 		})
