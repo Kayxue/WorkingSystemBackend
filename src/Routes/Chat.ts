@@ -7,6 +7,7 @@ import type { ServerWebSocket } from 'bun';
 import { and, eq, sql, gt, isNull, desc, lt } from "drizzle-orm";
 import {workers, employers, conversations, messages, gigs} from "../Schema/DatabaseSchema";
 import dbClient from "../Client/DrizzleClient";
+import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
 import { queryGetMessageSchema } from "../Types/zodSchema";
 import {FileManager} from "../Client/Cache/Index";
@@ -206,8 +207,6 @@ router.get("/ws", upgradeWebSocket((c) => {
 					rawWs.publish(getUserChannel(recipientId, recipientRole), payload);
 					// 5. 推播給自己 (多設備同步)
 					rawWs.send(payload);
-          console.log(payload);
-				
 				} catch (error) {
 					console.error('訊息發送失敗:', error);
 					rawWs.send(JSON.stringify({ type: 'error', text: 'Failed to send message' }));
@@ -272,92 +271,105 @@ router.get("/ws", upgradeWebSocket((c) => {
 	}	
 }));
 
-router.get('/conversations', authenticated, async (c) => {
-  const user = c.get('user');
+router.get('/conversations', authenticated, zValidator('query', z.object({
+	limit: z.coerce.number().int().positive().optional().default(10),
+	offset: z.coerce.number().int().nonnegative().optional().default(0),
+})), async (c) => {
+	const user = c.get('user');
+	const { limit, offset } = c.req.valid('query');
 
-  // 根據登入角色，動態決定查詢欄位
-  const myIdField = user.role === 'worker'
-	? { userId: conversations.workerId }
-	: { userId: conversations.employerId };
+	// 根據登入角色，動態決定查詢欄位
+	const myIdField = user.role === 'worker'
+		? { userId: conversations.workerId }
+		: { userId: conversations.employerId };
 
-  let myDeletedField: any,
-    myReadTimestampField: any,
+	let myDeletedField: any,
+		messagesDeletedField: any,
+		myReadTimestampField: any,
 		opponentSenderField: any,
-    opponentTable: any,
-    opponentJoinField: any,
-    opponentSelect: any;
+		opponentTable: any,
+		opponentJoinField: any,
+		opponentSelect: any;
 
-  if (user.role === 'worker') {
-    myDeletedField = conversations.deletedByWorkerAt;
-    myReadTimestampField = conversations.lastReadAtByWorker;
+	if (user.role === 'worker') {
+		myDeletedField = conversations.deletedByWorkerAt;
+		messagesDeletedField = messages.deletedByWorker;
+		myReadTimestampField = conversations.lastReadAtByWorker;
 		opponentSenderField = messages.senderEmployerId;
-    opponentTable = employers;
-    opponentJoinField = conversations.employerId;
-    opponentSelect = {
-      id: employers.employerId,
-      name: employers.employerName, // Employer 顯示公司名稱
+		opponentTable = employers;
+		opponentJoinField = conversations.employerId;
+		opponentSelect = {
+			id: employers.employerId,
+			name: employers.employerName, // Employer 顯示公司名稱
 			profile: employers.employerPhoto,
-    };
-  } else {
-    // role === 'employer'
-    myDeletedField = conversations.deletedByEmployerAt;
-    myReadTimestampField = conversations.lastReadAtByEmployer;
+		};
+	} else {
+		// role === 'employer'
+		myDeletedField = conversations.deletedByEmployerAt;
+		messagesDeletedField = messages.deletedByEmployer;
+		myReadTimestampField = conversations.lastReadAtByEmployer;
 		opponentSenderField = messages.senderWorkerId;
-    opponentTable = workers;
-    opponentJoinField = conversations.workerId;
-    opponentSelect = {
-      id: workers.workerId,
-      firstName: workers.firstName, // Worker 顯示姓名
-	  	lastName: workers.lastName,
+		opponentTable = workers;
+		opponentJoinField = conversations.workerId;
+		opponentSelect = {
+			id: workers.workerId,
+			firstName: workers.firstName, // Worker 顯示姓名
+			lastName: workers.lastName,
 			profilePhoto: workers.profilePhoto,
 		};
-  }
+	}
 
-  // 使用子查詢計算未讀數量和獲取最後一條訊息
-  const resultConversations = await dbClient
-    .select({
-      conversationId: conversations.conversationId,
+	// 使用子查詢計算未讀數量和獲取最後一條訊息
+	const resultConversations = await dbClient
+		.select({
+			conversationId: conversations.conversationId,
 			workerId: conversations.workerId,
 			employerId: conversations.employerId,
 			lastMessageAt: conversations.lastMessageAt,
 			createdAt: conversations.createdAt,
 			lastReadAtByWorker: conversations.lastReadAtByWorker,
 			lastReadAtByEmployer: conversations.lastReadAtByEmployer,
-      
-      // 獲取對方的資訊
-      opponent: opponentSelect,
-      
-      // 計算未讀數量 AND msg.${sql.raw(opponentSenderField.name)} IS NOT NULL
-      unreadCount: sql<number>`(
+
+			// 獲取對方的資訊
+			opponent: opponentSelect,
+
+			// 計算未讀數量 AND msg.${sql.raw(opponentSenderField.name)} IS NOT NULL
+			unreadCount: sql<number>`(
         SELECT COUNT(*)
         FROM ${messages} msg
         WHERE msg.conversation_id = ${conversations.conversationId}
-					
+					AND msg.${sql.raw(opponentSenderField.name)} IS NOT NULL
+          AND msg.${sql.raw(messagesDeletedField.name)} IS NOT TRUE
           AND msg.retracted_at IS NULL
           AND msg.created_at > COALESCE(${myReadTimestampField}, '1970-01-01T00:00:00Z')
       )::int`,
-      
-      // 獲取最後一條訊息的內容 (用於預覽)
-      lastMessage: sql<string>`(
+
+			// 獲取最後一條訊息的內容 (用於預覽)
+			lastMessage: sql<string>`(
         SELECT content
         FROM ${messages} msg
         WHERE msg.conversation_id = ${conversations.conversationId}
         ORDER BY msg.created_at DESC
         LIMIT 1
       )`,
-    })
-    .from(conversations)
-    .leftJoin(opponentTable, eq(opponentJoinField, opponentTable.workerId))
-    .where(
-      and(
-        eq(myIdField.userId, user.userId), // 1. 是我的對話
-        isNull(myDeletedField) // 2. 且我沒有刪除它
-      )
-    )
-    .orderBy(desc(conversations.lastMessageAt));
+		})
+		.from(conversations)
+		.leftJoin(opponentTable, eq(opponentJoinField, opponentTable.workerId))
+		.where(
+			and(
+				eq(myIdField.userId, user.userId), // 1. 是我的對話
+				isNull(myDeletedField) // 2. 且我沒有刪除它
+			)
+		)
+		.orderBy(desc(conversations.lastMessageAt))
+		.limit(limit + 1)
+		.offset(offset);
 
-  // 處理最後一條訊息被撤回的情況
-  const processedConversations = await Promise.all(resultConversations.map(async (convo) => {
+	const hasMore = resultConversations.length > limit;
+	const paginatedConversations = resultConversations.slice(0, limit);
+
+	// 處理最後一條訊息被撤回的情況
+	const processedConversations = await Promise.all(paginatedConversations.map(async (convo) => {
 		if (convo.opponent == null) {
 			return {
 				...convo,
@@ -402,9 +414,16 @@ router.get('/conversations', authenticated, async (c) => {
 				},
 			}
 		}
-  }));
+	}));
 
-  return c.json(processedConversations);
+	return c.json({
+		conversations: processedConversations,
+		pagination: {
+			limit,
+			offset,
+			hasMore,
+		},
+	});
 });
 
 router.get('/conversations/:conversationId/messages', authenticated
@@ -523,6 +542,24 @@ router.delete('/conversations/:conversationId', authenticated, async (c) => {
 
   if (result.length === 0) {
     return c.json({ error: 'Conversation not found or access denied' }, 404);
+  }else {
+    // delete all messages in this conversation for me
+    await dbClient
+      .update(messages)
+      .set(
+        user.role === 'worker'
+          ? { deletedByWorker: true }
+          : { deletedByEmployer: true }
+      )
+      .where(
+        and(
+          eq(messages.conversationId, conversationId),
+          // only update messages that are not already deleted by me
+          user.role === 'worker'
+            ? eq(messages.deletedByWorker, false)
+            : eq(messages.deletedByEmployer, false)
+        )
+      );
   }
 
   return c.json({ success: true });
@@ -695,35 +732,61 @@ router.get('/unread-status', authenticated, async (c) => {
   const user = c.get('user');
 
   const myIdField = user.role === 'worker'
-      ? conversations.workerId
-      : conversations.employerId;
+    ? conversations.workerId
+    : conversations.employerId;
 
   const myReadTimestampField = user.role === 'worker'
-      ? conversations.lastReadAtByWorker
-      : conversations.lastReadAtByEmployer;
+    ? conversations.lastReadAtByWorker
+    : conversations.lastReadAtByEmployer;
 
   const myDeletedField = user.role === 'worker'
-      ? conversations.deletedByWorkerAt
-      : conversations.deletedByEmployerAt;
+    ? conversations.deletedByWorkerAt
+    : conversations.deletedByEmployerAt;
 
-  const unreadCountResult = await dbClient
+  let unreadCountResult = null;
+  if (user.role == 'employer') {
+    unreadCountResult = await dbClient
       .select({
-          totalUnread: sql<number>`SUM(
-              (SELECT COUNT(*)
-              FROM ${messages} msg
-              WHERE msg.conversation_id = ${conversations.conversationId}
-                AND msg.retracted_at IS NULL
-                AND msg.created_at > COALESCE(${myReadTimestampField}, '1970-01-01T00:00:00Z'))
-          )::int`,
+        totalUnread: sql<number>`SUM(
+          (SELECT COUNT(*)
+          FROM ${messages} msg
+          WHERE msg.conversation_id = ${conversations.conversationId}
+            AND msg.sender_worker_id IS NOT NULL
+            AND msg.retracted_at IS NULL
+            AND msg.deleted_by_employer IS NOT FALSE
+            AND msg.created_at > COALESCE(${myReadTimestampField}, '1970-01-01T00:00:00Z'))
+        )::int`,
       })
       .from(conversations)
       .where(
-          and(
-              eq(myIdField, user.userId),
-              isNull(myDeletedField)
-          )
+        and(
+          eq(myIdField, user.userId),
+          isNull(myDeletedField)
+        )
       );
-
+  } else if (user.role == 'worker') {
+    unreadCountResult = await dbClient
+      .select({
+        totalUnread: sql<number>`SUM(
+          (SELECT COUNT(*)
+          FROM ${messages} msg
+          WHERE msg.conversation_id = ${conversations.conversationId}
+            AND msg.sender_employer_id IS NOT NULL
+            AND msg.retracted_at IS NULL
+            AND msg.deleted_by_employer IS NOT FALSE
+            AND msg.created_at > COALESCE(${myReadTimestampField}, '1970-01-01T00:00:00Z'))
+        )::int`,
+      })
+      .from(conversations)
+      .where(
+        and(
+          eq(myIdField, user.userId),
+          isNull(myDeletedField)
+        )
+      );
+  } else {
+    return c.text('Invalid role', 400);
+  }
   return c.text((unreadCountResult[0]?.totalUnread || 0) > 0 ? 'true' : 'false');
 });
 
