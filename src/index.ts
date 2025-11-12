@@ -15,7 +15,7 @@ import webSocketManager from "./Utils/WebSocketManager";
 const app = new Hono<HonoGenericContext>();
 const { websocket } = createBunWebSocket();
 
-app.use('/chat/*', async (c, next) => {
+app.use('*', async (c, next) => {
   const start = Date.now();
   const timestamp = new Date().toISOString();
   const api = c.req.path;

@@ -177,15 +177,36 @@ router.get("/ws", upgradeWebSocket((c) => {
 						.returning();
 
 					// 3. 準備推播的 payload
-					const payload = JSON.stringify({
+					let payload = {
 						type: 'private_message',
 						...savedMessage,
-					});
+					};
 
-					// 4. 推播給接收者
+          if (savedMessage.replyToId) {
+            // 如果有回覆訊息，取得該訊息的內容
+            const repliedMessage = await dbClient.query.messages.findFirst({
+              where: eq(messages.messagesId, savedMessage.replyToId),
+              columns: {
+                content: true,
+                createdAt: true,
+              }
+            })
+            payload = {
+              ...payload,
+              replySnippet: repliedMessage ? {
+                content: repliedMessage.content,
+                createdAt: repliedMessage.createdAt,
+              } : null
+            }
+          }
+
+          payload = JSON.stringify(payload);
+					
+          // 4. 推播給接收者
 					rawWs.publish(getUserChannel(recipientId, recipientRole), payload);
 					// 5. 推播給自己 (多設備同步)
 					rawWs.send(payload);
+          console.log(payload);
 				
 				} catch (error) {
 					console.error('訊息發送失敗:', error);
@@ -531,8 +552,8 @@ router.delete('/messages/:messageId', authenticated, async (c) => {
 
   // 2. 權限檢查
   const isParticipant =
-    (user.role === 'worker' && message[0].conversation.workerId === user.userId) ||
-    (user.role === 'employer' && message[0].conversation.employerId === user.userId);
+    (user.role === 'worker' && message.conversation.workerId === user.userId) ||
+    (user.role === 'employer' && message.conversation.employerId === user.userId);
 
   if (!isParticipant) {
     return c.json({ error: 'Access denied' }, 403);
@@ -664,6 +685,46 @@ router.post('/gig/:employerId/:gigId', authenticated, requireWorker, async (c) =
 	server.publish(getUserChannel(employerId, 'employer'), payload);
 
   return c.json({ success: true, message: savedMessage });
+});
+
+// ----------------------------------------------------
+// 7. 檢查是否有未讀訊息 (Check for Unread Messages)
+// GET /api/chat/unread-status
+// ----------------------------------------------------
+router.get('/unread-status', authenticated, async (c) => {
+  const user = c.get('user');
+
+  const myIdField = user.role === 'worker'
+      ? conversations.workerId
+      : conversations.employerId;
+
+  const myReadTimestampField = user.role === 'worker'
+      ? conversations.lastReadAtByWorker
+      : conversations.lastReadAtByEmployer;
+
+  const myDeletedField = user.role === 'worker'
+      ? conversations.deletedByWorkerAt
+      : conversations.deletedByEmployerAt;
+
+  const unreadCountResult = await dbClient
+      .select({
+          totalUnread: sql<number>`SUM(
+              (SELECT COUNT(*)
+              FROM ${messages} msg
+              WHERE msg.conversation_id = ${conversations.conversationId}
+                AND msg.retracted_at IS NULL
+                AND msg.created_at > COALESCE(${myReadTimestampField}, '1970-01-01T00:00:00Z'))
+          )::int`,
+      })
+      .from(conversations)
+      .where(
+          and(
+              eq(myIdField, user.userId),
+              isNull(myDeletedField)
+          )
+      );
+
+  return c.text((unreadCountResult[0]?.totalUnread || 0) > 0 ? 'true' : 'false');
 });
 
 export default { path: "/chat", router } as IRouter;
