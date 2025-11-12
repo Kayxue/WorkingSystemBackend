@@ -285,7 +285,9 @@ router.get("/detail/worker/:workerId", authenticated, requireEmployer, async (c)
         comment: true,
         createdAt: true,
       },
-
+      with: {
+        employer: true,
+      },
       orderBy: [desc(workerRatings.createdAt)],
       limit: requestLimit + 1, // 多查一筆來確認是否有更多資料
       offset: requestOffset,
@@ -298,6 +300,8 @@ router.get("/detail/worker/:workerId", authenticated, requireEmployer, async (c)
       data: {
         receivedRatings: returnRatings.map((rating) => ({
           ratingId: rating.ratingId,
+          // 使用部分隱藏的 email 作為名稱顯示
+          name: rating.employer.email.replace(/(.{2}).+(@.+)/, "$1****$2"),
           ratingValue: rating.ratingValue,
           comment: rating.comment,
           createdAt: rating.createdAt,
@@ -394,6 +398,9 @@ router.get("/detail/employer/:employerId", authenticated, requireWorker, async (
         comment: true,
         createdAt: true,
       },
+      with: {
+        worker: true,
+      },
       orderBy: [desc(employerRatings.createdAt)],
       limit: requestLimit + 1, // 多查一筆來確認是否有更多資料
       offset: requestOffset,
@@ -405,6 +412,8 @@ router.get("/detail/employer/:employerId", authenticated, requireWorker, async (
     return c.json({
       data: {
         receivedRatings: returnRatings.map((rating) => ({
+          // 使用部分隱藏的 email 作為名稱顯示
+          name: rating.worker.email.replace(/(.{2}).+(@.+)/, "$1****$2"),
           ratingId: rating.ratingId,
           ratingValue: rating.ratingValue,
           comment: rating.comment,
