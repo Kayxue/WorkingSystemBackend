@@ -753,7 +753,7 @@ router.get('/unread-status', authenticated, async (c) => {
           WHERE msg.conversation_id = ${conversations.conversationId}
             AND msg.sender_worker_id IS NOT NULL
             AND msg.retracted_at IS NULL
-            AND msg.deleted_by_employer IS NOT FALSE
+            AND msg.deleted_by_employer IS NOT TRUE
             AND msg.created_at > COALESCE(${myReadTimestampField}, '1970-01-01T00:00:00Z'))
         )::int`,
       })
@@ -773,7 +773,7 @@ router.get('/unread-status', authenticated, async (c) => {
           WHERE msg.conversation_id = ${conversations.conversationId}
             AND msg.sender_employer_id IS NOT NULL
             AND msg.retracted_at IS NULL
-            AND msg.deleted_by_employer IS NOT FALSE
+            AND msg.deleted_by_worker IS NOT TRUE
             AND msg.created_at > COALESCE(${myReadTimestampField}, '1970-01-01T00:00:00Z'))
         )::int`,
       })
