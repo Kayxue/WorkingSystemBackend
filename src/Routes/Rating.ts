@@ -623,17 +623,7 @@ router.get("/received-ratings/employer", authenticated, requireEmployer, async (
       with: {
         worker: {
           columns: {
-            workerId: true,
-            firstName: true,
-            lastName: true,
-          },
-        },
-        gig: {
-          columns: {
-            gigId: true,
-            title: true,
-            dateStart: true,
-            dateEnd: true,
+            email: true,
           },
         },
       },
@@ -648,17 +638,8 @@ router.get("/received-ratings/employer", authenticated, requireEmployer, async (
     return c.json({
       data: {
         receivedRatings: returnRatings.map((rating) => ({
-          ratingId: rating.ratingId,
-          worker: {
-            workerId: rating.worker.workerId,
-            name: `${rating.worker.firstName} ${rating.worker.lastName}`,
-          },
-          gig: {
-            gigId: rating.gig.gigId,
-            title: rating.gig.title,
-            startDate: rating.gig.dateStart,
-            endDate: rating.gig.dateEnd,
-          },
+          ratingId: rating.ratingId,        
+          name: rating.worker.email.replace(/(.{2}).+(@.+)/, "$1****$2"),
           ratingValue: rating.ratingValue,
           comment: rating.comment,
           createdAt: rating.createdAt,
@@ -703,19 +684,9 @@ router.get("/received-ratings/worker", authenticated, requireWorker, async (c) =
       with: {
         employer: {
           columns: {
-            employerId: true,
-            employerName: true,
-            branchName: true,
+            email: true,
           },
-        },
-        gig: {
-          columns: {
-            gigId: true,
-            title: true,
-            dateStart: true,
-            dateEnd: true,
-          },
-        },
+        }
       },
       orderBy: [desc(workerRatings.createdAt)],
       limit: requestLimit + 1, // 多查一筆來確認是否有更多資料
@@ -728,16 +699,7 @@ router.get("/received-ratings/worker", authenticated, requireWorker, async (c) =
     return c.json({
       ratings: returnRatings.map((rating) => ({
         ratingId: rating.ratingId,
-        employer: {
-          employerId: rating.employer.employerId,
-          name: rating.employer.branchName ? `${rating.employer.employerName} - ${rating.employer.branchName}` : rating.employer.employerName,
-        },
-        gig: {
-          gigId: rating.gig.gigId,
-          title: rating.gig.title,
-          startDate: rating.gig.dateStart,
-          endDate: rating.gig.dateEnd,
-        },
+        name: rating.employer.email.replace(/(.{2}).+(@.+)/, "$1****$2"),
         ratingValue: rating.ratingValue,
         comment: rating.comment,
         createdAt: rating.createdAt,
