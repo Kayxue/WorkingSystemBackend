@@ -4,8 +4,8 @@ import type { HonoGenericContext } from "../Types/types";
 import { authenticated } from "../Middleware/authentication";
 import { requireAdmin } from "../Middleware/guards";
 import dbClient from "../Client/DrizzleClient";
-import { eq } from "drizzle-orm";
-import { admins, employers } from "../Schema/DatabaseSchema";
+import { eq, sql } from "drizzle-orm";
+import { admins, employers, workers } from "../Schema/DatabaseSchema";
 import { zValidator } from "@hono/zod-validator";
 import { adminRegisterSchema } from "../Types/zodSchema";
 import { hash } from "@node-rs/argon2";
@@ -187,6 +187,167 @@ router.get("/active-sessions", authenticated, async (c) => {
 		console.error("獲取活躍 sessions 失敗:", error);
 		return c.text("獲取活躍 sessions 失敗", 500);
 	}
+});
+
+router.get("/users/search", authenticated, requireAdmin, async (c) => {
+	const role = c.req.query("role"); // 'worker', 'employer', 'admin'
+	const query = c.req.query("query");
+	const type = c.req.query("type"); // 'name', 'email', 'id'
+	const page = parseInt(c.req.query("page") || "1", 10);
+	const limit = Math.max(1, Math.min(200, parseInt(c.req.query("limit") || "10", 10)));
+
+	if (!role || !query || !type) {
+		return c.text("Role, query, and type are required", 400);
+	}
+
+	const offset = (page - 1) * limit;
+	let results;
+
+	switch (role) {
+		case "worker":
+			{
+				let whereClause;
+				switch (type) {
+					case "id":
+						whereClause = eq(workers.workerId, query);
+						break;
+					case "name":
+						whereClause = sql`concat(${workers.firstName}, ' ', ${workers.lastName}) ilike ${`%${query}%`}`;
+						break;
+					case "email":
+						whereClause = sql`${workers.email} ilike ${`%${query}%`}`;
+						break;
+					default:
+						return c.text("Invalid search type for worker", 400);
+				}
+				results = await dbClient.query.workers.findMany({
+					where: whereClause,
+					limit: limit + 1,
+					offset: offset,
+					columns : {
+						password: false,
+						fcmTokens: false,
+					}
+				});
+			}
+			break;
+		case "employer":
+			{
+				let whereClause;
+				switch (type) {
+					case "id":
+						whereClause = eq(employers.employerId, query);
+						break;
+					case "name":
+						whereClause = sql`${employers.employerName} ilike ${`%${query}%`}`;
+						break;
+					case "email":
+						whereClause = sql`${employers.email} ilike ${`%${query}%`}`;
+							break;
+					default:
+						return c.text("Invalid search type for employer", 400);
+				}
+				results = await dbClient.query.employers.findMany({
+					where: whereClause,
+					limit: limit + 1,
+					offset: offset,
+					columns : {
+						password: false,
+						fcmTokens: false,
+					}
+				});
+			}
+			break;
+		case "admin":
+			{
+				let whereClause;
+				switch (type) {
+					case "id":
+						whereClause = eq(admins.adminId, query);
+						break;
+					case "email":
+						whereClause = sql`${admins.email} ilike ${`%${query}%`}`;
+						break;
+					default:
+						return c.text("Invalid search type for admin", 400);
+				}
+				results = await dbClient.query.admins.findMany({
+					where: whereClause,
+					limit: limit + 1,
+					offset: offset,
+					columns : {
+						password: false
+					}
+				});
+			}
+			break;
+		default:
+			return c.text("Invalid role", 400);
+	}
+
+	const hasMore = results.length > limit;
+	const returnedResults = results.slice(0, limit);
+
+	return c.json({
+    user: returnedResults,
+    pagination: {
+      limit,
+      page,
+      hasMore,
+      returned: returnedResults.length,
+    }
+	});
+});
+
+router.put("/lock-worker/:workerId", authenticated, requireAdmin, async (c) => {
+	const workerId = c.req.param("workerId");
+	const worker = await dbClient.query.workers.findFirst({
+		where: eq(workers.workerId, workerId),
+	});
+
+	if (!worker) {
+		return c.text("Worker not found", 404);
+	}
+
+	if (worker.lockedUntil && worker.lockedUntil > new Date()) {
+		return c.text("Worker account is already locked", 400);
+	}
+
+	const lockDurationDays = 30;
+	const lockedUntil = new Date();
+	lockedUntil.setDate(lockedUntil.getDate() + lockDurationDays);
+	await dbClient
+		.update(workers)
+		.set({ lockedUntil: lockedUntil })
+		.where(eq(workers.workerId, workerId));
+	
+	return c.text("Worker account has been locked", 200);
+});
+
+// 
+router.put("/unlock-worker/:workerId", authenticated, requireAdmin, async (c) => {
+	const workerId = c.req.param("workerId");
+	const worker = await dbClient.query.workers.findFirst({
+		where: eq(workers.workerId, workerId),
+	});
+
+	if (!worker) {
+		return c.text("Worker not found", 404);
+	}
+
+	if (worker.lockedUntil === null) {
+		return c.text("Worker account is not locked", 400);
+	}
+
+	await dbClient
+		.update(workers)
+		.set({ lockedUntil: null, absenceCount: 0 })
+		.where(eq(workers.workerId, workerId));
+	
+	// 清除快取
+	await UserCache.clearUserProfile(workerId, Role.WORKER);
+	
+	return c.text("Worker account has been unlocked", 200);
 });
 
 export default { path: "/admin", router } as IRouter;

@@ -12,6 +12,8 @@ import { createBunWebSocket} from 'hono/bun';
 import type { Server } from 'bun';
 import webSocketManager from "./Utils/WebSocketManager";
 
+
+
 const app = new Hono<HonoGenericContext>();
 const { websocket } = createBunWebSocket();
 
@@ -23,27 +25,38 @@ app.use('*', async (c, next) => {
   await next();
 
   const duration = Date.now() - start;
-  const responseTimestamp = new Date().toISOString();
+  const responseTimestamp = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString();
   const response = c.res;
   const status = response.status;
-  const logPrefix = `[${responseTimestamp}] Response for API: ${api}, Status: ${status}, Duration: ${duration}ms`;
-  const contentType = response.headers.get('Content-Type');
-  console.log(logPrefix);
-  // if (contentType && (contentType.includes('application/json') || contentType.includes('text/'))) {
-  //   try {
-  //     const body = await response.clone().json();
-  //     console.log(`${logPrefix}, Body:`, JSON.stringify(body));
-  //   } catch (e) {
-  //       try {
-  //           const body = await response.clone().text();
-  //           console.log(`${logPrefix}, Body:`, body);
-  //       } catch (e2) {
-  //           console.log(`${logPrefix} (Could not log body)`);
-  //       }
-  //   }
-  // } else {
-  //   console.log(`${logPrefix} (Non-loggable content-type: ${contentType})`);
-  // }
+  // Check if the server running in docker container
+  if (Bun.env.IN_DOCKER === 'true') {
+    const clientIp = c.req.header('x-forwarded-for') || 'Unknown IP';
+    const logPrefix = `[${responseTimestamp}] IP: ${clientIp} Response for API: ${api}, Status: ${status}, Duration: ${duration}ms`;
+    console.log(logPrefix);
+  } else {
+    const logPrefix = `[${responseTimestamp}] Response for API: ${api}, Status: ${status}, Duration: ${duration}ms`;
+    console.log(logPrefix);
+  }
+  
+  if (Bun.env.DEBUGMODE === 'true') {
+    const logPrefix = `[${responseTimestamp}] IP:  Response for API: ${api}, Status: ${status}, Duration: ${duration}ms`;
+    const contentType = response.headers.get('Content-Type');
+    if (contentType && (contentType.includes('application/json') || contentType.includes('text/'))) {
+      try {
+        const body = await response.clone().json();
+        console.log(`${logPrefix}, Body:`, JSON.stringify(body));
+      } catch (e) {
+          try {
+              const body = await response.clone().text();
+              console.log(`${logPrefix}, Body:`, body);
+          } catch (e2) {
+              console.log(`${logPrefix} (Could not log body)`);
+          }
+      }
+    } else {
+      console.log(`${logPrefix} (Non-loggable content-type: ${contentType})`);
+    }
+  }
 });
 
 const store = new RedisStoreAdapter({
