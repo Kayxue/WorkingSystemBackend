@@ -4,7 +4,7 @@ import type IRouter from "../Interfaces/IRouter";
 import type { HonoGenericContext } from "../Types/types";
 import { authenticated } from "../Middleware/authentication";
 import type { ServerWebSocket } from 'bun';
-import { and, eq, sql, gt, isNull, desc, lt } from "drizzle-orm";
+import { and, or, eq, sql, gt, isNull, desc, lt } from "drizzle-orm";
 import { workers, employers, conversations, messages, gigs } from "../Schema/DatabaseSchema";
 import dbClient from "../Client/DrizzleClient";
 import { z } from "zod";
@@ -355,7 +355,11 @@ router.get('/conversations', authenticated, zValidator('query', z.object({
       )`,
 		})
 		.from(conversations)
-		.leftJoin(opponentTable, eq(opponentJoinField, opponentTable.workerId))
+		.leftJoin(opponentTable, () =>
+			or(
+				eq(opponentJoinField, opponentTable.workerId),
+				eq(opponentJoinField, opponentTable.employerId)
+			))
 		.where(
 			and(
 				eq(myIdField.userId, user.userId), // 1. 是我的對話
