@@ -302,7 +302,7 @@ router.get('/conversations', authenticated, zValidator('query', z.object({
 		opponentSelect = {
 			id: employers.employerId,
 			name: employers.employerName, // Employer 顯示公司名稱
-			profile: employers.employerPhoto,
+			profilePhoto: employers.employerPhoto,
 		};
 	} else {
 		// role === 'employer'
@@ -378,13 +378,15 @@ router.get('/conversations', authenticated, zValidator('query', z.object({
 		if (convo.opponent == null) {
 			return {
 				...convo,
-				opponent: { id: null, name: '[用戶已刪除]' },
+				opponent: { id: null, name: '[用戶已刪除]', profilePhoto: null },
 			}
 		}
 		let photoUrlData = null;
 		const profilePhoto = convo.opponent.profilePhoto;
 		if (profilePhoto && typeof profilePhoto === 'object' && profilePhoto.r2Name) {
-			const url = await FileManager.getPresignedUrl(`profile-photos/workers/${profilePhoto.r2Name}`);
+			const url = (user.role === 'worker') 
+				? await FileManager.getPresignedUrl(`profile-photos/employers/${profilePhoto.r2Name}`) 
+				: await FileManager.getPresignedUrl(`profile-photos/workers/${profilePhoto.r2Name}`);
 			if (url) {
 				photoUrlData = {
 					url: url,
@@ -392,20 +394,6 @@ router.get('/conversations', authenticated, zValidator('query', z.object({
 					type: profilePhoto.type,
 				};
 			}
-
-			return {
-				...convo,
-				// 確保 opponent 物件存在
-				opponent: (user.role === 'employer') ? {
-					id: convo.opponent.id,
-					name: convo.opponent.firstName + convo.opponent.lastName,
-					profilePhoto: photoUrlData,
-				} : {
-					...convo.opponent,
-					profilePhoto: photoUrlData,
-				},
-			};
-
 		}
 		return {
 			...convo,
@@ -414,7 +402,8 @@ router.get('/conversations', authenticated, zValidator('query', z.object({
 				name: convo.opponent.firstName + convo.opponent.lastName,
 				profilePhoto: photoUrlData,
 			} : {
-				...convo.opponent,
+				id: convo.opponent.id,
+				name: convo.opponent.name,
 				profilePhoto: photoUrlData,
 			},
 		}
