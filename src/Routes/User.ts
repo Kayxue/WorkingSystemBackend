@@ -90,7 +90,7 @@ router.post("/register/worker", zValidator("json", workerSignupSchema), async (c
   await NotificationHelper.notifyUserWelcome(newUser.workerId, newUser.firstName, "worker");
 
   // 發送歡迎[郵件]給新註冊的打工者
-  const subject = "你好! 歡迎加入 WorkNow";
+  const subject = "你好! 歡迎加入 SlotGo";
   const html = EmailTemplates.generateWorkerWelcomeEmail(firstName);
   await sendEmail(email, subject, html);
 
@@ -177,7 +177,7 @@ router.post("/register/employer", uploadDocument, zValidator("form", employerSig
       await NotificationHelper.notifyUserWelcome(newUser.employerId, newUser.employerName, "employer");
 
       // 發送歡迎[郵件]給新註冊的商家
-      const subject = "你好! 歡迎加入 WorkNow！";
+      const subject = "你好! 歡迎加入 SlotGo！";
       const html = EmailTemplates.generateEmployerWelcomeEmail(employerName);
       await sendEmail(email, subject, html);
 
@@ -715,7 +715,7 @@ router.post("/pw-reset/request", zValidator("json", passwordResetRequestSchema),
 
     if (userExists) {
       const verificationCode = await PasswordResetManager.storeVerificationCode(email);
-      const subject = "WorkNow 密碼重設驗證碼";
+      const subject = "SlotGo 密碼重設驗證碼";
       const html = EmailTemplates.generatePasswordResetEmail(verificationCode, 30);
       await sendEmail(email, subject, html);
     } else {
@@ -783,7 +783,7 @@ router.post("/pw-reset/verify", zValidator("json", passwordResetVerifySchema), a
     const clientIP = info.remote.address
     console.log(clientIP);
 
-    const subject = "WorkNow 密碼重設成功通知";
+    const subject = "SlotGo 密碼重設成功通知";
     const html = EmailTemplates.generatePasswordResetSuccessEmail();
     await sendEmail(email, subject, html);
     await PasswordResetManager.deleteVerificationCode(email);

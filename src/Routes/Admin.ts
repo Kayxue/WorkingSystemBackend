@@ -15,6 +15,8 @@ import { UserCache } from "../Client/Cache/Index";
 import { Role } from "../Types/types";
 import SessionManager from "../Utils/SessionManager";
 import {FileManager} from "../Client/Cache/Index";
+import { EmailTemplates } from "../Utils/EmailTemplates";
+import { sendEmail } from "../Client/EmailClient";
 
 const router = new Hono<HonoGenericContext>();
 
@@ -109,6 +111,8 @@ router.patch(
 		if (employerFound.approvalStatus !== "pending") {
 			return c.text("Employer is not pending approval", 400);
 		}
+
+		const employerName = employerFound.employerName;
 		const updatedEmployer = await dbClient
 			.update(employers)
 			.set({ approvalStatus: "approved" })
@@ -119,9 +123,12 @@ router.patch(
 		await NotificationHelper.notifyAccountApproved(
 			employerFound.employerId,
 			Role.EMPLOYER,
-			employerFound.employerName
+			employerName
 		);
 
+		const subject = "SlotGo 帳戶審核通過通知";
+		const html = EmailTemplates.generateEmployerApprovalEmail(employerName);
+		await sendEmail(employerFound.email, subject, html);
 		await UserCache.clearUserProfile(employerFound.employerId, Role.EMPLOYER);
 		return c.json(updatedEmployer[0]);
 	},
@@ -130,7 +137,10 @@ router.patch(
 router.patch("/rejectEmployer/:id", authenticated, requireAdmin, async (c) => {
   const id = c.req.param("id");
   const body = await c.req.json();
-  const reason = body.reason || "請聯繫客服了解詳情";
+  const reason =
+    typeof body.reason === "string" && body.reason.trim().length > 0
+      ? body.reason
+      : "請聯繫客服了解詳情";
   const employerFound = await dbClient.query.employers.findFirst({
     where: eq(employers.employerId, id),
   });
@@ -143,6 +153,7 @@ router.patch("/rejectEmployer/:id", authenticated, requireAdmin, async (c) => {
     return c.text("Employer is not in pending status", 400);
   }
 
+  const employerName = employerFound.employerName;
   const updatedEmployer = await dbClient
     .update(employers)
     .set({ approvalStatus: "rejected" })
@@ -153,14 +164,17 @@ router.patch("/rejectEmployer/:id", authenticated, requireAdmin, async (c) => {
   await NotificationHelper.notifyAccountRejected(
     employerFound.employerId,
     Role.EMPLOYER,
-    employerFound.employerName,
+    employerName,
     reason
   );
 
+  const subject = "SlotGo 帳戶審核未通過通知";
+  const html = EmailTemplates.generateEmployerRejectionEmail(employerName, reason);
+  await sendEmail(employerFound.email, subject, html);
   await UserCache.clearUserProfile(employerFound.employerId, Role.EMPLOYER);
   return c.json(updatedEmployer[0]);
 });
-  
+
 // 踢用戶下線
 router.post("/kick-user/:userId", authenticated, async (c) => {
 	const userId = c.req.param("userId");

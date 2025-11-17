@@ -1,4 +1,13 @@
 export class EmailTemplates {
+  private static escapeHtml(text: string): string {
+    return text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
   /**
    * 生成密碼重設郵件 HTML 內容
    */
@@ -92,7 +101,7 @@ export class EmailTemplates {
 
         <div class="footer">
             <p>此郵件由系統自動發送，請勿回覆</p>
-            <p>© 2025 WorkNow 打工平台. 保留所有權利.</p>
+            <p>© 2025 SlotGo 打工平台. 保留所有權利.</p>
         </div>
     </div>
 </body>
@@ -109,7 +118,7 @@ export class EmailTemplates {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WorkNow 密碼重設成功</title>
+    <title>SlotGo 密碼重設成功</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -174,7 +183,7 @@ export class EmailTemplates {
 
         <div class="footer">
             <p>此郵件由系統自動發送，請勿回覆</p>
-            <p>© 2025 WorkNow 打工平台. 保留所有權利.</p>
+            <p>© 2025 SlotGo 打工平台. 保留所有權利.</p>
         </div>
     </div>
 </body>
@@ -191,7 +200,7 @@ export class EmailTemplates {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>歡迎加入 WorkNow</title>
+    <title>歡迎加入 SlotGo</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -260,7 +269,7 @@ export class EmailTemplates {
 <body>
     <div class="container">
         <div class="header">
-            <h1>🎉 歡迎加入 WorkNow！</h1>
+            <h1>🎉 歡迎加入 SlotGo！</h1>
         </div>
 
         <div class="welcome-icon">👋</div>
@@ -268,7 +277,7 @@ export class EmailTemplates {
         <p>親愛的 ${firstName}，</p>
 
         <div class="welcome-message">
-            <strong>🎊 恭喜您成功註冊 WorkNow 打工平台！</strong><br>
+            <strong>🎊 恭喜您成功註冊 SlotGo 打工平台！</strong><br>
             您現在已經是我們大家庭的一員了。讓我們一起開始精彩的打工之旅吧！
         </div>
 
@@ -291,7 +300,7 @@ export class EmailTemplates {
         <div class="footer">
             <p>如果您有任何問題，歡迎隨時聯繫我們的客服團隊</p>
             <p>此郵件由系統自動發送，請勿回覆</p>
-            <p>© 2025 WorkNow 打工平台. 保留所有權利.</p>
+            <p>© 2025 SlotGo 打工平台. 保留所有權利.</p>
         </div>
     </div>
 </body>
@@ -308,7 +317,7 @@ export class EmailTemplates {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>歡迎加入 WorkNow</title>
+    <title>歡迎加入 SlotGo</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -377,7 +386,7 @@ export class EmailTemplates {
 <body>
     <div class="container">
         <div class="header">
-            <h1>🎉 歡迎加入 WorkNow！</h1>
+            <h1>🎉 歡迎加入 SlotGo！</h1>
         </div>
 
         <div class="welcome-icon">👋</div>
@@ -385,7 +394,7 @@ export class EmailTemplates {
         <p>尊敬的 ${employerName} 團隊，</p>
 
         <div class="welcome-message">
-            <strong>🎊 恭喜您成功註冊 WorkNow 打工平台！</strong><br>
+            <strong>🎊 恭喜您成功註冊 SlotGo 打工平台！</strong><br>
             您現在已經加入我們的打工大家庭，讓我們一起開啟成功的招聘之旅！
         </div>
 
@@ -407,7 +416,167 @@ export class EmailTemplates {
         <div class="footer">
             <p>如果您有任何問題，歡迎隨時聯繫我們的客服團隊</p>
             <p>此郵件由系統自動發送，請勿回覆</p>
-            <p>© 2025 WorkNow 打工平台. 保留所有權利.</p>
+            <p>© 2025 SlotGo 打工平台. 保留所有權利.</p>
+        </div>
+    </div>
+</body>
+</html>`;
+  }
+
+  static generateEmployerApprovalEmail(employerName: string): string {
+    return `
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SlotGo 帳戶審核通過通知</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            background: #f9f9f9;
+            padding: 30px;
+            border-radius: 10px;
+            border: 1px solid #ddd;
+        }
+        .header {
+            text-align: center;
+            color: #27ae60;
+            margin-bottom: 30px;
+        }
+        .success-icon {
+            font-size: 48px;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .info-box {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            border-radius: 5px;
+            padding: 20px;
+            margin: 20px 0;
+            color: #155724;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            font-size: 14px;
+            color: #777;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>✅ 帳戶審核通過</h1>
+        </div>
+
+        <div class="success-icon">🎉</div>
+
+        <p>尊敬的 ${employerName} 團隊，</p>
+
+        <div class="info-box">
+            <strong>恭喜！您的 SlotGo 商家帳戶已通過審核。</strong><br>
+            您現在可以正式登入平台，發佈職缺並管理您的招聘流程。
+        </div>
+
+        <p>建議您：</p>
+        <ul>
+            <li>立即登入後台，完善商家資料與公司介紹</li>
+            <li>發佈第一個工作機會，吸引優秀的打工夥伴</li>
+        </ul>
+
+        <p>感謝您選擇 SlotGo，我們期待協助您找到最合適的人才。</p>
+
+        <div class="footer">
+            <p>此郵件由系統自動發送，請勿回覆</p>
+            <p>© 2025 SlotGo 打工平台. 保留所有權利.</p>
+        </div>
+    </div>
+</body>
+</html>`;
+  }
+
+  static generateEmployerRejectionEmail(employerName: string, reason: string): string {
+    const safeReason = this.escapeHtml(reason).replace(/\r?\n/g, "<br>");
+
+    return `
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SlotGo 帳戶審核結果通知</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            background: #fef6f6;
+            padding: 30px;
+            border-radius: 10px;
+            border: 1px solid #f2d7d5;
+        }
+        .header {
+            text-align: center;
+            color: #c0392b;
+            margin-bottom: 30px;
+        }
+        .alert-icon {
+            font-size: 48px;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .reason-box {
+            background: #f9ebea;
+            border: 1px solid #f5b7b1;
+            border-radius: 5px;
+            padding: 20px;
+            margin: 20px 0;
+            color: #7b241c;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            font-size: 14px;
+            color: #777;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>⚠️ 帳戶審核未通過</h1>
+        </div>
+
+        <div class="alert-icon">📩</div>
+
+        <p>尊敬的 ${employerName} 團隊，</p>
+
+        <p>感謝您申請加入 SlotGo 平台。經過審核，目前未能通過，原因如下：</p>
+
+        <div class="reason-box">
+            ${safeReason}
+        </div>
+
+        <p>若您有補充資料或需要協助，歡迎聯繫客服人員。</p>
+        <p>期待未來能再度為您提供服務。</p>
+
+        <div class="footer">
+            <p>此郵件由系統自動發送，請勿回覆</p>
+            <p>© 2025 SlotGo 打工平台. 保留所有權利.</p>
         </div>
     </div>
 </body>
