@@ -447,7 +447,20 @@ router.get('/conversations/:conversationId/messages', authenticated
 			// 預先載入 "被回覆的訊息" 及其 "發送者"
 			with: {
 				replyToMessage: true,
-				gig: true,
+				gig: {
+					columns: {
+						gigId: true,
+						employerId: true,
+						title: true,
+						dateStart: true,
+						dateEnd: true,
+						timeStart: true,
+						timeEnd: true,
+						city: true,
+						district: true,
+						address: true,
+					}
+				}
 			},
 		});
 
@@ -498,7 +511,7 @@ router.get('/conversations/:conversationId/messages', authenticated
 
 				// ✨ 新增：回傳簡化版的 "被回覆訊息" 物件
 				replySnippet: replySnippet,
-				gig: msg.gig, // ✨ 新增：回傳完整的 gig 物件
+				gig: msg.gig // ✨ 新增：回傳完整的 gig 物件
 			};
 		});
 
@@ -683,9 +696,22 @@ router.post('/gig/:gigId', authenticated, requireWorker, async (c) => {
 		where: and(
 			eq(gigs.gigId, gigId),
 		),
+		columns: {
+			gigId: true,
+			employerId: true,
+			title: true,
+			dateStart: true,
+			dateEnd: true,
+			timeStart: true,
+			timeEnd: true,
+			city: true,
+			district: true,
+			address: true,
+		},
 		with: {
 			employer: {
 				columns: {
+					employerId: true,
 					employerName: true,
 				}
 			}
@@ -701,7 +727,7 @@ router.post('/gig/:gigId', authenticated, requireWorker, async (c) => {
 	console.log(employer);
 
 	// 2. 查找或創建對話
-	const conversationId = await findOrCreateConversation(user.userId, gig.employerId);
+	const conversationId = await findOrCreateConversation(user.userId, employer.employerId);
 
 	// 3. 儲存訊息
 	const [savedMessage] = await dbClient
@@ -725,7 +751,7 @@ router.post('/gig/:gigId', authenticated, requireWorker, async (c) => {
 
 	// 5. 推播給接收者和自己
 	server.publish(getUserChannel(user.userId, 'worker'), payload);
-	server.publish(getUserChannel(gig.employerId, 'employer'), payload);
+	server.publish(getUserChannel(employer.employerId, 'employer'), payload);
 	
 	return c.json({message: savedMessage, gig: gig , employerName: employer.employerName });
 });
