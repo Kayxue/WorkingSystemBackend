@@ -15,14 +15,14 @@ import { authenticate, authenticated, deserializeUser } from "../Middleware/auth
 import { uploadDocument, uploadProfilePhoto } from "../Middleware/fileUpload";
 import type IRouter from "../Interfaces/IRouter";
 import dbClient from "../Client/DrizzleClient";
-import { eq, avg, count, sql } from "drizzle-orm";
-import { employers, workers, workerRatings, employerRatings } from "../Schema/DatabaseSchema";
+import { eq, avg, count, sql, and, isNull, lt } from "drizzle-orm";
+import { employers, workers, workerRatings, employerRatings, conversations, gigApplications, gigs } from "../Schema/DatabaseSchema";
 import { argon2Config } from "../config";
 import { hash as argon2hash, verify } from "@node-rs/argon2";
 import { Role } from "../Types/types";
 import { UserCache, FileManager, RatingCache, s3Client } from "../Client/Cache/Index";
 import NotificationHelper from "../Utils/NotificationHelper";
-import { requireEmployer } from "../Middleware/guards";
+import { requireEmployer, requireWorker } from "../Middleware/guards";
 import { sendEmail } from "../Client/EmailClient";
 import SessionManager from "../Utils/SessionManager";
 import { PasswordResetManager } from "../Utils/PasswordResetManager";
@@ -794,5 +794,77 @@ router.post("/pw-reset/verify", zValidator("json", passwordResetVerifySchema), a
     return c.text("處理密碼重設時發生錯誤", 500);
   }
 });
+
+/* 
+  return three values for a worker's state:
+  1. return number of pending jobs for a worker
+  2. return number of unrated employers for a worker
+  3. return number of unread messages for a worker
+*/
+router.get("/worker/states", authenticated, requireWorker, async (c) => {
+  const user = c.get("user");
+  const workerId = user.workerId;
+
+  // 1. Get number of pending jobs (applications with status 'pending_worker_confirmation')
+  const pendingJobsCount = await dbClient
+    .select({ value: count() })
+    .from(gigApplications)
+    .where(
+      and(
+        eq(gigApplications.workerId, workerId),
+        eq(gigApplications.status, "pending_worker_confirmation")
+      )
+    );
+
+  // 2. Get number of unrated employers
+  const unratedEmployersCount = await dbClient
+    .select({ value: count() })
+    .from(gigApplications)
+    .innerJoin(gigs, eq(gigApplications.gigId, gigs.gigId))
+    .leftJoin(
+      employerRatings,
+      and(
+        eq(employerRatings.gigId, gigs.gigId),
+        eq(employerRatings.workerId, workerId)
+      )
+    )
+    .where(
+      and(
+        eq(gigApplications.workerId, workerId),
+        eq(gigApplications.status, "worker_confirmed"),
+        lt(gigs.dateEnd, new Date().toISOString().split("T")[0]), // Gig has ended
+        isNull(employerRatings.ratingId) // Not yet rated by the worker
+      )
+    );
+
+  // 3. Get number of unread messages
+  const unreadMessagesCount = await dbClient
+    .select({
+      totalUnread: sql<number>`SUM(
+        (SELECT COUNT(*)
+        FROM messages msg
+        WHERE msg.conversation_id = ${conversations.conversationId}
+          AND msg.sender_employer_id IS NOT NULL
+          AND msg.retracted_at IS NULL
+          AND msg.deleted_by_worker IS NOT TRUE
+          AND msg.created_at > COALESCE(${conversations.lastReadAtByWorker}, '1970-01-01T00:00:00Z'))
+      )::int`,
+    })
+    .from(conversations)
+    .where(
+      and(
+        eq(conversations.workerId, workerId),
+        isNull(conversations.deletedByWorkerAt)
+      )
+    );
+
+  return c.json({
+    pendingJobs: pendingJobsCount[0].value || 0,
+    unratedEmployers: unratedEmployersCount[0].value || 0,
+    unreadMessages: unreadMessagesCount[0]?.totalUnread || 0,
+  });
+});
+
+
 
 export default { path: "/user", router } as IRouter;
