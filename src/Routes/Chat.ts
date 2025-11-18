@@ -673,8 +673,8 @@ router.post('/conversations/:conversationId/read', authenticated, async (c) => {
 // 6. 發送工作資訊訊息 (Send Gig Info Message)
 // POST /api/chat/gig/:employerId/:gigId
 // ----------------------------------------------------
-router.post('/gig/:employerId/:gigId', authenticated, requireWorker, async (c) => {
-	const { employerId, gigId } = c.req.param();
+router.post('/gig/:gigId', authenticated, requireWorker, async (c) => {
+	const { gigId } = c.req.param();
 	const user = c.get('user');
 	const server = c.get('server');
 
@@ -682,16 +682,26 @@ router.post('/gig/:employerId/:gigId', authenticated, requireWorker, async (c) =
 	const gig = await dbClient.query.gigs.findFirst({
 		where: and(
 			eq(gigs.gigId, gigId),
-			eq(gigs.employerId, employerId)
 		),
+		with: {
+			employer: {
+				columns: {
+					employerName: true,
+				}
+			}
+		}
 	});
 
 	if (!gig) {
 		return c.json({ error: 'Gig not found' }, 404);
 	}
 
+	const { employer , ...gigData } = gig;
+	console.log(gigData);
+	console.log(employer);
+
 	// 2. 查找或創建對話
-	const conversationId = await findOrCreateConversation(user.userId, employerId);
+	const conversationId = await findOrCreateConversation(user.userId, gig.employerId);
 
 	// 3. 儲存訊息
 	const [savedMessage] = await dbClient
@@ -704,18 +714,20 @@ router.post('/gig/:employerId/:gigId', authenticated, requireWorker, async (c) =
 		})
 		.returning();
 
+
 	// 4. 準備推播的 payload
 	const payload = JSON.stringify({
 		type: 'gig_message',
 		...savedMessage,
 		gig: gig, // 將 gig 資訊附加到 payload
+		employerName: employer.employerName,
 	});
 
 	// 5. 推播給接收者和自己
 	server.publish(getUserChannel(user.userId, 'worker'), payload);
-	server.publish(getUserChannel(employerId, 'employer'), payload);
-
-	return c.json({ success: true, message: savedMessage });
+	server.publish(getUserChannel(gig.employerId, 'employer'), payload);
+	
+	return c.json({message: savedMessage, gig: gig , employerName: employer.employerName });
 });
 
 // ----------------------------------------------------
