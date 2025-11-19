@@ -188,6 +188,7 @@ router.get("/ws", upgradeWebSocket((c) => {
 						const repliedMessage = await dbClient.query.messages.findFirst({
 							where: eq(messages.messagesId, savedMessage.replyToId),
 							columns: {
+								messagesId: true,
 								content: true,
 								createdAt: true,
 							}
@@ -195,6 +196,7 @@ router.get("/ws", upgradeWebSocket((c) => {
 						payload = {
 							...payload,
 							replySnippet: repliedMessage ? {
+								messagesId: repliedMessage.messagesId,
 								content: repliedMessage.content,
 								createdAt: repliedMessage.createdAt,
 							} : null
@@ -509,9 +511,8 @@ router.get('/conversations/:conversationId/messages', authenticated
 				replyToId: msg.replyToId,
 				retractedAt: msg.retractedAt,
 
-				// ✨ 新增：回傳簡化版的 "被回覆訊息" 物件
 				replySnippet: replySnippet,
-				gig: msg.gig // ✨ 新增：回傳完整的 gig 物件
+				gig: msg.gig,
 			};
 		});
 
