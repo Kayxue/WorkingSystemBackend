@@ -47,7 +47,7 @@ export const employerSignupSchema = z.object({
     .regex(/[0-9]/, "Must contain at least one number"),
   employerName: z.string(),
   branchName: z.string().optional(),
-  industryType: z.string().min(2, "Industry type required"),
+  industryType: z.enum(["餐飲", "批發/零售", "倉儲運輸", "展場活動", "其他"]),
   address: z.string().min(5, "Address must be at least 5 characters"),
   phoneNumber: z
     .string()
