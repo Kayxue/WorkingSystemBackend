@@ -46,7 +46,7 @@ async function getUserIdAndRoleFromToken(token: string) {
 	}
 }
 
-// 查找或創建對話 (Drizzle 查詢)
+// 查找或創建對話 (Drizzle 查詢) 
 async function findOrCreateConversation(workerId: string, employerId: string) {
 	const result = await dbClient
 		.insert(conversations)
@@ -57,7 +57,8 @@ async function findOrCreateConversation(workerId: string, employerId: string) {
 		})
 		.onConflictDoUpdate({
 			target: [conversations.workerId, conversations.employerId],
-			set: { lastMessageAt: new Date() },
+			// 如果已存在，更新 lastMessageAt
+			set: { lastMessageAt: new Date(), deletedByWorkerAt: null, deletedByEmployerAt: null },
 		})
 		.returning({ id: conversations.conversationId });
 
